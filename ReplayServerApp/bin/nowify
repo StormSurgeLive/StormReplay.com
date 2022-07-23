@@ -1,0 +1,54 @@
+#!/usr/bin/env perl
+
+BEGIN {
+    use FindBin qw/$Bin/;
+    use lib qq{$Bin/../lib};
+}
+
+use Util::H2O::More qw/h2o o2h opt2h2o/;
+use Getopt::Long ();
+use StormSurgeLive::Nowify qw//;
+
+use constant EXIT_ERROR   => 1;
+use constant EXIT_SUCCESS => 0;
+
+=pod
+=head1 USAGE
+
+   nowify --advStart <number> --advEnd <number> --oldStorm <storm#> --oldYear <storm YYYY> --oldDir ./input/dir --newStart-YYYYDDMM= <YYYYDDMM[HH]> --newDir ./output/dir [--newStorm <number>] [--btkBasin btk-basin] [--fstBasin fst-basin]
+
+Example,
+
+   nowify --advStart 1 --advEnd 30 --oldStorm 18 --oldYear 2005 --oldDir ./rita --newStart=20200427 --newDir ./new-rita --newStorm 7 --btkBasin al --fstBasin at 
+=cut
+
+my @opts = (
+    qw/
+      advStart=i
+      advEnd=i
+      DEBUG
+      fstBasin=s
+      btkBasin=s
+      frequency=s
+      newDir=s
+      newStart=s
+      newStorm=s
+      newName=s
+      oldDir=s
+      /
+);
+my $o = h2o {}, opt2h2o(@opts);
+Getopt::Long::GetOptionsFromArray( \@ARGV, $o, @opts );
+
+local $@;
+my $ret = eval {
+	my $nowifier = StormSurgeLive::Nowify->new(DEBUG => $o->DEBUG);
+	$nowifier->nowify(o2h $o);
+} or undef;
+
+if ( not $ret or $@ ) {
+    warn $@ // q{Unknown error};
+    exit EXIT_ERROR;
+}
+
+exit EXIT_SUCCESS;

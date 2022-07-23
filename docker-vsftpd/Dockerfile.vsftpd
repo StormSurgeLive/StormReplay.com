@@ -1,0 +1,23 @@
+FROM alpine 
+
+RUN apk update && apk upgrade
+RUN apk update && apk upgrade && apk add curl tar make gcc build-base wget gnupg
+RUN apk add tmux vim htop vsftpd shadow
+
+ARG USER_ID=14
+ARG GROUP_ID=50
+
+COPY etc/vsftpd/vsftpd.conf /etc/vsftpd/vsftpd.conf
+RUN mkdir -p /var/ftp
+RUN chown -R root:root /etc/vsftpd
+#RUN mkdir -p /var/ftp/atcf/afst
+#RUN mkdir -p /var/ftp/atcf/btk
+#RUN echo "Hi, it's working" > /var/ftp/atcf/README
+RUN mkdir -p /var/log/vsftpd/
+RUN chown -R ftp:ftp /var/log/vsftpd
+
+EXPOSE 20 21 21100-21110
+
+# Note, this script is not copied, it's reached via mounted volume
+# defined in docker-compose.yml
+ENTRYPOINT ["/opt/sbin/run-replay-server.sh"]

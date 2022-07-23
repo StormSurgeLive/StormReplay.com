@@ -1,0 +1,41 @@
+Quick Start:
+------------
+
+1. start the FTP server if it's not already started;
+
+  $ cd docker-vsftpd
+  $ docker-compose -d up 
+
+Note: docker-vsftpd/docker-compose.yml is set to restart
+on host boot, at the time of this writing;
+
+2. start web application;
+
+  $ cd ReplayServerApp/
+  $ sudo ./bin/starman.sh
+
+3. in another terminal (I use tmux), start the replayd daemon
+
+  $ cd ReplayServerApp/
+  $ ./bin/replayd
+
+Testing Notes:
+
+a. the web app is essentially a single file application, contained
+   in the file ./lib/StormSurgeApp/ReplayServer.pm
+
+b. ./bin/nowify is a commandline tool that uses the same module,
+   lib/StormSurgeLive/Nowify.pm that the bin/replayd uses when
+   it determines a storm is ready to be nowified; this file *is*
+   in the repo but contains things that should be in the repo,
+   like the AWS SES SMTP credentials
+
+c. email notifications sent by ./bin/replayd are implemented in
+   the module, lib/StormSurgeLive/Notify.pm
+
+d. storms are currently defined as part of ./config.yaml (but should
+   be moved out eventually)
+
+e. user credentials for both the WWW UI and the API client are in
+   the file, ./passwd.yaml; but is not in the git repo
+

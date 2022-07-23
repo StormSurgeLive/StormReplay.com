@@ -1,0 +1,579 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+BEGIN {
+    use FindBin qw/$Bin/;
+    use lib qq{$Bin/../lib};
+}
+
+use POSIX qw//;
+use File::Path qw/make_path/;
+use File::Copy qw//;
+use File::Temp qw//;
+use Util::H2O::More  qw/h2o opt2h2o/;
+use XML::RSS   qw//;
+use YAML       qw/Load/;
+use Config::Tiny ();
+use Getopt::Long;
+use StormSurgeLive::Nowify qw//;
+use StormSurgeLive::Notify qw//;
+
+sub ddd {
+    require Data::Dumper;
+    print Data::Dumper::Dumper( \@_ );
+}
+
+sub dddie {
+    require Data::Dumper;
+    print Data::Dumper::Dumper( \@_ );
+    die;
+}
+
+my @options = (qw/appconfig=s configdir=s statusdir=s wait=i DEBUG/);
+my $opts = h2o {
+    appconfig => qq{$Bin/../config.yml},    # this is the Dancer2 app config
+    configdir => q{},                       # directory to look for storm configs
+    statusdir => q{},                       # directory to look for storm status files
+    wait      => 1,                         # check interview, defaults to 15 seconds
+}, opt2h2o(@options);
+Getopt::Long::GetOptionsFromArray( \@ARGV, $opts, @options );
+
+# load configuration options that are contained in the
+# Dancer2 based web app that lets user self-service their
+# own storms
+
+my $appconfig = YAML::LoadFile( $opts->appconfig );
+h2o -recurse, $appconfig;
+
+# global notifier client
+my $notifier = StormSurgeLive::Notify->new( { %{$appconfig->notify->email} } );
+
+# if not set in $opts, get from $appconfig
+if ( not $opts->configdir ) {
+    $opts->configdir( $appconfig->replayd_base->configdir );
+}
+
+# if not set in $opts, get from $appconfig
+if ( not $opts->statusdir ) {
+    $opts->statusdir( $appconfig->replayd_base->statusdir );
+}
+
+# initialize with epoch, not meant
+# to track time exactly
+my $schedule = {};
+my $tick     = time;
+MAIN_LOOP:
+while (1) {
+    my $configs = get_configs();
+
+    if ( not $configs and $tick % 17 == 0 ) {
+        print qq{Waiting for some storms to spawn ...\n};
+    }
+
+    foreach my $uuid ( keys %$configs ) {
+        foreach my $storm ( keys %{ $configs->$uuid } ) {
+            my $config_file = $configs->$uuid->$storm->config;
+            my $status_file = $configs->$uuid->$storm->status;
+
+	    # touch files that indicate actions fo replay to perform; can be added by any tool
+	    # but are were originally meant to be used by the web application to communicate
+	    # with replayd
+	    my $touch_files = h2o {
+              delete  => (exists $configs->$uuid->$storm->{delete}) ? $configs->$uuid->$storm->delete : undef,
+              nextAdv => (exists $configs->$uuid->$storm->{nextAdv}) ? $configs->$uuid->$storm->nextAdv : undef,
+            };
+
+            _dispatch_storm( $schedule, $tick, $storm, $config_file, $status_file, $touch_files);
+        }
+    }
+
+    if ( $tick % 99 == 0 ) {
+        printf qq{$tick (info) Checking again in %d seconds\n}, $opts->wait;
+    }
+    sleep $opts->wait;
+
+    # update "clock"
+    $tick += $opts->wait;
+}
+
+# dispatches action method based on current state and other things
+sub _dispatch_storm {
+    my ( $schedule, $tick, $storm, $config_file, $status_file, $touch_files ) = @_;
+
+    my $config = h2o -recurse,-nolock, { %{ Config::Tiny->read($config_file) } };
+    my $status = h2o -recurse, { %{ Config::Tiny->read($status_file) } };
+    my $uuid   = $config->replayd->MD5;
+
+    # update run state so proper state method is dispatched
+    # TODO: make touch file thing into a dispatch
+    if ($touch_files->delete) {
+      my $status = h2o -recurse, { %{ Config::Tiny->read($status_file) } };
+      update_status( status => $status, status_file => $status_file, new_status => q{DELETING} );
+      unlink $touch_files->delete;
+      return 1; ## return early
+    }
+    elsif ($touch_files->nextAdv) {
+      # update next adv time
+      update_schedule( schedule => $schedule, tick => $tick, uuid => $uuid, storm => $storm, frequency => 0 );
+      # delete .nextAdv file
+      unlink $touch_files->nextAdv;
+      return 1; ## return early
+    }
+
+    # treats STATE in .status as a real "state"; match then executes
+    # (this is basically a finite state machine below)
+    my %params = (
+        schedule     => $schedule,
+        tick         => $tick,
+        uuid         => $uuid,
+        storm        => $storm,
+        config       => $config,
+        status       => $status,
+        config_file  => $config_file,
+        status_file  => $status_file,
+        DEBUG        => $opts->DEBUG,
+    );
+    my $dispatch = {
+        q{NEED2NOWIFY} => sub {
+            print qq{$tick (info) Nowifying $storm for $uuid ...\n};
+            do_nowify( %params );
+            update_schedule( %params, frequency => 0 );
+            update_status( %params, new_status => q{FIRSTRUN} );
+        },
+        q{FIRSTRUN} => sub { first_run( %params )   },
+        q{RUNNING}  => sub { running( %params )     },
+        q{ENDING}   => sub { ending( %params )      },
+        q{DELETING} => sub { delete_storm( %params )},
+        q{ENDED}    => sub { maybe_reinit( %params )  },
+    };
+
+    my $_state = $status->status->STATE;
+    if ( exists $dispatch->{$_state} and ref $dispatch->{$_state} eq q{CODE} ) {
+        $dispatch->{$_state}->();
+    }
+
+    return 1;
+}
+
+sub delete_storm {
+    my %opts = @_;
+    my $o    = h2o \%opts, qw/schedule tick uuid storm config status status_file state config_file/;
+    printf qq{%s (info) Deleting %s for %s ...\n}, $tick, $o->config->replayd->NAME, $o->uuid;
+    my $btk_dest = _btk_dest( $o->config, $o->status );
+    my $btk_file = sprintf(qq{%s/%s}, $btk_dest, _btk_filename( $o->config, $o->status ));
+
+    # delete files
+    unlink grep { -e $_ } ($o->status_file, $o->config_file, $btk_file);
+
+    my $storm_designation = _nhc_storm_designation($o->config, $o->status);
+
+    # determine path
+    my $rss_src      = _rss_src( $o->config, $o->status );
+    my $rss_dest     = _rss_dest( $o->config, $o->status );
+    my $rss_filename = _rss_filename( $o->config, $o->status );
+    my $rss_file     = sprintf qq{%s/%s}, $rss_dest, $rss_filename;
+
+    my $dest_rss = XML::RSS->new;
+    $dest_rss->parsefile($rss_file);
+
+    # find entry index for $storm if it's in the at-index.xml already
+    my $storm_index = _find_index( $storm_designation, $dest_rss );
+
+    if ( defined $storm_index ) {
+        printf qq{%s (info) Deleting %s (%s) at position %s RSS file ... \n}, $tick, $o->config->replayd->NAME, $storm_designation, $storm_index;
+        splice @{$dest_rss->{items}}, $storm_index, 1;
+        _replace_rss($dest_rss, $rss_file);
+    }
+
+    # delete nowified data
+    my $now_dir = _get_now_dir( $o->config, $o->status );
+    printf qq{%s (info) Deleting %s (%s) storm data in %s ... \n}, $tick, $o->config->replayd->NAME, $storm_designation, $now_dir;
+    opendir( my $dh, $now_dir ) || die qq{Can't opendir nowified storm dir for delete, "$now_dir": $!};
+  READDIR_LOOP:
+    foreach my $file ( readdir($dh) ) {
+      next READDIR_LOOP if grep { m/$file/ } (qw/. ../);
+      unlink sprintf(q{%s/%s}, $now_dir, $file) || warn $!; 
+    }
+    rmdir $now_dir || warn $!;
+
+    return;
+}
+
+sub _nhc_storm_designation {
+    my ($config, $status) = @_;
+    my $_rss_basin = $config->replayd->RSS_BASIN;
+    my $_nhc_basin = $config->replayd->NHC_BASIN;
+    my $_storm     = $config->replayd->NUMBER;
+    my $_year      = $config->replayd->NOWYEAR;
+
+    # string to look for in $item->{description} to determine it's the entry
+    # for the storm we're updating
+    my $storm_designation = uc sprintf( "%s%02d%02d", $_nhc_basin, $_storm, $_year );
+    return $storm_designation;
+}
+
+sub _remove_from_rss {
+    my %opts = @_;
+    my $o = h2o \%opts, qw/config src_file dest_file/;
+
+    # if $dest_file doesn't exist, copy the file directly
+    if ( not -e $o->dest_file ) {
+        File::Copy::copy $o->src_file, $o->dest_file;
+        return 1;
+    }
+
+    my $storm_designation = _nhc_storm_designation($o->config, $o->status);
+
+    # open src via XML parser
+    my $src_rss = XML::RSS->new;
+    $src_rss->parsefile($o->src_file);
+
+    # open dest (if it exists) via XML parser
+    my $dest_rss = XML::RSS->new;
+    $dest_rss->parsefile($o->dest_file);
+
+    # insert new entry - assumed here to not be in conflict with anything that is
+    # currently in $src_rss->{items}
+    my $replacement_item = $src_rss->{items}->[0];
+
+    # find entry index for $storm if it's in the at-index.xml already
+    my $storm_index = _find_index( $storm_designation, $dest_rss );
+
+    if ( defined $storm_index ) {
+        printf qq{%s (info) Replacing %s (%s) at position %s RSS file ... \n}, $tick, $o->config->replayd->NAME, $storm_designation, $storm_index;
+        $dest_rss->{items}->[$storm_index] = $replacement_item;
+    }
+    else {
+        printf qq{$tick (info) Inserting $storm_designation into RSS file... \n};
+        push( @{ $dest_rss->{items} }, $replacement_item );
+    }
+
+  REPLACE_CURRENT_XML:
+    {
+        # write index-at.xml to a temporary file, them perform an atomic mv
+	my ($fh, $tmp_file) = File::Temp::tempfile();
+        $dest_rss->save($tmp_file);
+
+        # perform atomic mv to overwrite existing file
+        File::Copy::move( $tmp_file, $o->dest_file );
+    }
+
+    return;
+}
+
+sub first_run {
+    my %opts = @_;
+    my $o    = h2o \%opts, qw/schedule tick uuid storm config status status_file state/;
+
+    # initialize entry in schedule, will issue on next check (around $o->wait seconds)
+    my $initial_tick = ( $o->status->status->EARLIEST_ISSUE_EPOCH and $o->status->status->EARLIEST_ISSUE_EPOCH ne q{NaN} ) ? $o->status->status->EARLIEST_ISSUE_EPOCH : $tick;
+
+    # init CURRENTADV
+    $o->status->status->CURRENTADV( $o->config->replayd->STARTADV );
+
+    # now "run" the first time
+    running( @_, state => q{RUNNING} );
+
+    return;
+}
+
+# Next "phase"
+# * custom issue schedule (e.g., specific advisories and ranges)
+
+sub _notify_if {
+    my ( $notifier, $o, $subject, $msg ) = @_;
+    if ( $o->config->replayd->{NOTIFY} and $o->config->replayd->{EMAIL} ) {
+        $notifier->send( to => $o->config->replayd->EMAIL, subject => $subject, content => $msg );
+    }
+    return;
+}
+
+sub running {
+    my %opts = @_;
+    my $o    = h2o \%opts, qw/schedule tick uuid storm config status status_file state/;
+
+    $o->state(q{RUNNING}) if not defined $o->state;
+
+    if ( not $o->schedule->{ $o->uuid }->{ $o->storm } ) {
+        update_schedule( schedule => $o->schedule, tick => $o->tick, uuid => $o->uuid, storm => $o->storm, frequency => 0 );
+    }
+
+    if ( $o->tick >= $o->schedule->{ $o->uuid }->{ $o->storm } ) {
+        update_schedule( schedule => $o->schedule, tick => $o->tick, uuid => $o->uuid, storm => $o->storm, frequency => $o->config->replayd->FREQUENCY );
+
+        # update next, next-next ADVs
+	my $current_adv = $o->status->status->CURRENTADV;
+        my $next_adv = next_advisory( $o->config, $o->status );
+	my $next_next_adv = $next_adv + 1;
+
+        # move to ENDING if this is the next to last advisory
+        if ( $next_adv == $o->config->replayd->ENDADV ) {
+            printf qq{%s (info) %s is ending after this advisory (currently %d).\n}, $o->tick, $o->storm, $current_adv;
+            $o->state(q{ENDING});
+        }
+        elsif ( $next_adv > $o->config->replayd->ENDADV ) {
+            $o->state(q{ENDED});
+            printf qq{%s (info) %s ended at advisory %d.\n}, $o->tick, $o->storm, $current_adv;
+	    $next_next_adv = $o->status->status->CURRENTADV;
+            update_status( status => $o->status, status_file => $o->status_file, new_status => $o->state, next_adv => $next_adv );
+            return; # no longer issuing, so return out of this sub
+
+        }
+
+        update_status( status => $o->status, status_file => $o->status_file, new_status => $o->state, next_adv => $next_adv );
+
+        issue_advisory( $o->config, $o->status, $o->schedule );
+
+        update_status( status => $o->status, status_file => $o->status_file, last_adv => $current_adv, current_adv => $next_adv, next_adv => $next_next_adv );
+
+	$current_adv = $o->status->status->CURRENTADV;
+
+        my $msg = sprintf qq{%s (info) Issuing Advisory %s %s for %s ...\n}, $o->tick, $current_adv, $o->storm, $o->uuid;
+
+        print $msg;
+
+        my $subject = sprintf qq{(info) Issuing Advisory %s %s}, $current_adv, $o->storm;
+        _notify_if($notifier, $o, $subject, $msg);
+
+    }
+
+    return;
+}
+
+sub ending {
+    my %opts = @_;
+    running( %opts, state => q{ENDED} );
+    return;
+}
+
+sub maybe_reinit {
+    my %opts = @_;
+    my $o    = h2o \%opts, qw/schedule tick uuid storm config status status_file state/;
+    if ( $o->config->replayd->LOOP and $o->status->status->STATE ne q{NEED2NOWIFY} ) {
+      running( @_, state => q{NEED2NOWIFY} );
+    }
+}
+
+sub next_advisory {
+    my ( $config, $status ) = @_;
+    my $next_adv = $status->status->NEXTADV;
+    my $ret = ( not $next_adv or $next_adv eq q{NaN} ) ? $config->replayd->STARTADV :  $next_adv;
+    return $ret;
+}
+
+sub _btk_filename {
+    my ( $config, $status ) = @_;
+    return sprintf( qq{b%s%02d%04d.dat}, $config->replayd->BTK_BASIN, $config->replayd->NUMBER, $config->replayd->NOWYEAR );
+}
+
+sub _btk_src {
+    my ( $config, $status ) = @_;
+    my $nowdir        = _get_now_dir( $config, $status );
+    my $_btk_filename = _btk_filename( $config, $status );
+    return sprintf( qq{%s/%02d.%s}, $nowdir, $status->status->CURRENTADV, $_btk_filename );
+}
+
+sub _btk_dest {
+    my ( $config, $status ) = @_;
+    return sprintf( qq{%s%s/%s}, $config->replayd->FTP_ROOT, $config->replayd->FTP_HDIR, $config->replayd->MD5 );
+}
+
+sub _rss_filename {
+    my ( $config, $status ) = @_;
+    my $destdir = sprintf( qq{index-%s.xml}, $config->replayd->RSS_BASIN );
+    return $destdir;
+}
+
+sub _rss_src {
+    my ( $config, $status ) = @_;
+    my $_rss_filename = _rss_filename( $config, $status );
+    my $nowdir        = _get_now_dir( $config, $status );
+    return sprintf( qq{%s/%02d.%02d%04d.%s}, $nowdir, $status->status->CURRENTADV, $config->replayd->NUMBER, $config->replayd->NOWYEAR, $_rss_filename );
+}
+
+sub _rss_dest {
+    my ( $config, $status ) = @_;
+    my $_rss_filename = _rss_filename( $config, $status );
+    my $destdir = sprintf(qq{%s/../public/rss/%s}, $Bin, $config->replayd->MD5);
+    return $destdir;
+}
+
+sub issue_advisory {
+    my ( $config, $status ) = @_;
+
+    my $btk_src      = _btk_src( $config, $status );
+    my $btk_dest     = _btk_dest( $config, $status );
+    my $btk_filename = _btk_filename( $config, $status );
+    my $rss_src      = _rss_src( $config, $status );
+    my $rss_dest     = _rss_dest( $config, $status );
+    my $rss_filename = _rss_filename( $config, $status );
+    my $rss_file     = sprintf qq{%s/%s}, $rss_dest, $rss_filename;
+
+    # shove things into FTP via docker container (not as portable as direct FTP interaction)
+    my $exit = system(qq{docker exec vsftpd mkdir -p $btk_dest});
+    $exit = system(qq{docker cp $btk_src vsftpd:$btk_dest/$btk_filename});
+
+    # RSS served via Dancer
+    if ( not -d $rss_dest ) {
+      make_path(qq{$rss_dest}, 1, 0755);
+    }
+
+    # handles merging RSS in the face of more than 1 storm
+    _insert_into_rss( config => $config, src_file => $rss_src, dest_file => $rss_file );
+
+    return;
+}
+
+sub _insert_into_rss {
+    my %opts = @_;
+    my $o = h2o \%opts, qw/config src_file dest_file/;
+
+    # if $dest_file doesn't exist, copy the file directly
+    if ( not -e $o->dest_file ) {
+        File::Copy::copy $o->src_file, $o->dest_file;
+        return 1;
+    }
+
+    # getting here means $dest_file exists already and we must
+    # insert <item> from $src_file into $dest
+
+    my $_rss_basin = $o->config->replayd->RSS_BASIN;
+    my $_nhc_basin = $o->config->replayd->NHC_BASIN;
+    my $_storm     = $o->config->replayd->NUMBER;
+    my $_year      = $o->config->replayd->NOWYEAR;
+
+    # string to look for in $item->{description} to determine it's the entry
+    # for the storm we're updating
+    my $storm_designation = sprintf( "%s%02d%02d", uc $_nhc_basin, $_storm, $_year );
+
+    # open src via XML parser
+    my $src_rss = XML::RSS->new;
+    $src_rss->parsefile($o->src_file);
+
+    # open dest (if it exists) via XML parser
+    my $dest_rss = XML::RSS->new;
+    $dest_rss->parsefile($o->dest_file);
+
+    # insert new entry - assumed here to not be in conflict with anything that is
+    # currently in $src_rss->{items}
+    my $replacement_item = $src_rss->{items}->[0];
+
+    # find entry index for $storm if it's in the at-index.xml already
+    my $storm_index = _find_index( $storm_designation, $dest_rss );
+
+    if ( defined $storm_index ) {
+        printf qq{$tick (info) Replacing $storm_designation at position $storm_index in RSS file... \n};
+        $dest_rss->{items}->[$storm_index] = $replacement_item;
+    }
+    else {
+        printf qq{$tick (info) Inserting $storm_designation into RSS file... \n};
+        push( @{ $dest_rss->{items} }, $replacement_item );
+    }
+
+    _replace_rss($dest_rss, $o->dest_file);
+
+    return;
+}
+
+sub _replace_rss {
+    my ( $dest_rss, $dest_file ) = @_;
+
+    # write index-at.xml to a temporary file, them perform an atomic mv
+    my ( $fh, $tmp_file ) = File::Temp::tempfile();
+    $dest_rss->save($tmp_file);
+
+    # perform atomic mv to overwrite existing file
+    File::Copy::move( $tmp_file, $dest_file );
+    return;
+}
+
+# used by _insert_into_rss to determine if storm is in XML forecast file
+#   and if so, where so it can be replaced
+sub _find_index {
+    my (  $storm_designation, $dest_rss ) = @_;
+    my $index;
+  FIND_ENTRY:
+    foreach my $item ( @{ $dest_rss->{items} } ) {
+        if ( $item->{description} =~ m/$storm_designation/g ) {
+            $index //= 0; # sets index to 0th element if not set;
+            last FIND_ENTRY;
+        }
+        ++$index;
+    }
+    return $index;
+}
+
+sub update_schedule {
+    my %opts = @_;
+    my $o    = h2o \%opts, qw/schedule tick uuid storm frequency/;
+    $schedule->{ $o->uuid }->{ $o->storm } = $o->tick + $o->frequency;
+    return $schedule->{ $o->uuid }->{ $o->storm };
+}
+
+sub update_status {
+    my %opts = @_;
+    my $o    = h2o \%opts, qw/status status_file new_status last_adv current_adv next_adv earliest_issue_epoch/;
+    $o->status->status->STATE( $o->new_status )                          if defined $o->new_status;
+    $o->status->status->LASTADV( $o->last_adv )                          if defined $o->last_adv;
+    $o->status->status->CURRENTADV( $o->current_adv )                    if defined $o->current_adv;
+    $o->status->status->NEXTADV( $o->next_adv )                          if defined $o->next_adv;
+    $o->status->status->EARLIEST_ISSUE_EPOCH( $o->earliest_issue_epoch ) if defined $o->earliest_issue_epoch;
+    Config::Tiny->new( { %{ $o->status } } )->write( $o->status_file );
+    return $o->new_status;
+}
+
+sub _get_now_dir {
+    my ( $config, $status ) = @_;
+    my $new_dir = sprintf( qq{%s/%s/%s}, $config->replayd->NOWBASE, $config->replayd->MD5, $config->replayd->NAME );
+    return $new_dir;
+}
+
+sub _get_old_dir {
+    my ( $config, $status ) = @_;
+    my $old_dir = sprintf( qq{%s/%s}, $config->replayd->BASE, $config->replayd->SOURCE );
+    return $old_dir;
+}
+
+sub do_nowify {
+    my %opts   = @_;
+    my $o      = h2o \%opts, qw/status config/;
+    my $params = {
+        q{advStart}   => $o->config->replayd->STARTADV,
+        q{advSnd}     => $o->config->replayd->ENDADV,
+        q{btkBasin}   => $o->config->replayd->BTK_BASIN,
+        q{fstBasin}   => $o->config->replayd->RSS_BASIN,
+	q{frequency}  => $o->config->replayd->FREQUENCY,
+        q{newStorm}   => $o->config->replayd->NUMBER,
+        q{newDir}     => _get_now_dir( $o->config, $o->status ),
+        q{newStart}   => $o->config->replayd->NEWSTART,
+        q{oldDir}     => _get_old_dir( $o->config, $o->status ),
+    };
+
+    my $nowify = StormSurgeLive::Nowify->new( DEBUG => $o->DEBUG );
+
+    local $@;
+    my $ret = eval { $nowify->nowify($params) } or undef;
+    if ( not $ret or $@ ) {
+        printf qq{$tick (info) %s\n}, ($@) ? $@ : q{Unknown};
+    }
+
+    return 1;
+}
+
+sub get_configs {
+    my $storms_configs = {};
+    my $configdir      = $opts->configdir;
+    if ( not -d $configdir ) {
+       mkdir $configdir || die qq{'$configdir' does not exist, error creating it: $!\n};
+    }
+    opendir( my $dh, $configdir );
+  READDIR_LOOP:
+    foreach my $file ( grep { -f "$configdir/$_" } readdir($dh) ) {
+        next READDIR_LOOP if ( $file =~ m/^\./ );    # skip any files that start with a '.'
+        my ( $uuid, $storm, $kind ) = split /\./, $file;
+        $storms_configs->{$uuid}->{$storm}->{$kind} = qq{$configdir/$file};
+    }
+    return h2o -recurse, $storms_configs;
+}

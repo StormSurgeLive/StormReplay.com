@@ -1,0 +1,20 @@
+README
+- describes how to start vftpd as a docker container and other things
+  related to building the docker container
+
+docker-vsftpd
+- docker related files and things for building and running the vftpd
+  docker container
+
+ReplayServerApp
+- probably the directory you want, contains all Perl code and stuff
+  related to running the web application and "replayd" daemon that
+  does the actual work related to requests made by the user; also
+  contains the code used to do the nowification and a tool called
+  "nowify" that can be run at the commandline
+
+DESCRIPTION
+- this file
+
+QUICK-START
+- some basic information on setting this thing up again

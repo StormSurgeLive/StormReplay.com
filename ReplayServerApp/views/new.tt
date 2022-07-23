@@ -1,0 +1,163 @@
+    <h2>New Storm Configuration</h2>
+    <div ng-app="newStormApp" ng-controller="listController">
+      <form ng-model="new_storm_form" name="new_storm_form">
+        <table border=1 width=545>
+          <tr>
+            <th>Option</th>
+            <th>Selection</th>
+          </tr>
+          <tr>
+            <td align=left>Historical Storm<sup><a href=/stormlist target=_other>+</a></sup></td>
+            <td align=left>
+              <select ng-model="data.name" ng-change="onStormSelect(data.name)">
+                <option value="" ng-selected="selected">Select a Storm!</option>
+                <% FOREACH storm IN storms.keys.sort -%>
+                <option value="<% storm -%>"><% storm.ucfirst -%> (<% storms.$storm.year -%>)</option>
+                <% END -%>
+              </select>
+              <br/>
+            </td>
+          </tr>
+          <tr>
+            <td align=left>
+              Issuing Frequency 
+              <br/><font size=2 color=gray>Specifies how often "new" advisories are issued in <i>real time</i>.</font>
+            </td align=left>
+            <td align=left>
+              <select name="selectFrequency" id="selectFrequency" ng-options="frequency.name for frequency in frequencies track by frequency.value" ng-model="data.frequency"></select>
+            </td>
+          </tr>
+          <tr>
+            <td align=left>
+              Nowification Interval
+              <br/><font size=2 color=gray>Specifies the time interval of the data records produced.</font>
+            </td>
+            <td align=left>
+              <select name="selectNowificationInterval" id="selectNowificationInterval" ng-options="interval.name for interval in intervals track by interval.value" ng-model="data.interval"></select>
+            </td>
+          </tr>
+          <tr>
+            <td align=left> Start Advisory</td align=left>
+            <td align=left> 
+              <select name="selectStart" id="selectStart" ng-options="option.name for option in options track by option.value" ng-model="data.startadv"></select>
+            </td>
+          </tr>
+          <tr>
+            <td align=left> End Advisory</td align=left>
+            <td align=left> 
+              <select name="selectEnd" id="selectEnd" ng-options="option.name for option in options track by option.value" ng-model="data.endadv"></select>
+            </td>
+          </tr>
+            <td align=left> <code>COLDSTARTDATE</code></td align=left>
+            <td align=left> tbd</td>
+          </tr>
+          </tr>
+            <td align=left> <code>HINDCASTLENGTH</code></td align=left>
+            <td align=left> 30.0</td>
+          </tr>
+          </tr>
+          <tr>
+            <td colspan=2 align=left>
+              <input type=checkbox ng-model="data.truehindcast"/>
+              <i>True <i>hindcast</i> (don't <i>nowify</i>)
+              <br/>
+              <input type=checkbox ng-model="data.loop"/>
+              <i>Loop storm until stopped manually</i> 
+              <br/>
+              <input type=checkbox ng-model="data.notify"/>
+              <i>Notify by Email</i> 
+              <span align=right ng-if="data.notify"><input type=text style="height:12px" ng-model="data.email" size=30></span>
+            </td>
+          </tr>
+          <tr>
+            <td bgcolor=lightgreen colspan=2 align=center ng-if="data.name && data.startadv && data.endadv && data.frequency">
+              <button ng-click="doLogin()">Start Storm!</button>
+            </td>
+          </tr>
+        </table>
+        <span ng-if="error.message"><font color="{{error.color}}">{{error.message}}</font><br/></span>
+        <br/>Visit the <i><a href=/status>status</a></i> to manage your current storms.
+      </form>
+    </div>
+
+    <script>
+     /* AngularJS Application Controller */
+     var newStormApp=angular.module('newStormApp',[]);
+     newStormApp.controller('listController', ['$scope', '$http', '$timeout', function ($scope, $http, $timeout) {
+         var baseAPIUrl = getBaseURL(); 
+
+         $scope.data = {};
+         $scope.error = {};
+
+         // storm JSON placed via templated parameter
+         $scope.storms = <% stormJSON -%>;
+         $scope.options = [];
+
+         $scope.intervals = [
+           { value: 6*60*60, name: '6 hours' },
+           { value: 3*60*60, name: '3 hours' },
+           { value: 2*60*60, name: '2 hours' },
+           { value: 1*60*60, name: '1 hours' },
+           { value: 45*60, name: '45 minutes' },
+           { value: 30*60, name: '30 minutes' },
+           { value: 15*60, name: '15 minutes' },
+           { value: 10*60, name: '10 minutes' },
+           { value: 5*60, name: '5 minutes' },
+           { value: 1*60, name: '1 minute' },
+         ];
+         $scope.data.interval = $scope.intervals[0];
+
+         $scope.frequencies = [
+           { value: 6*60*60, name: '6 hours' },
+           { value: 3*60*60, name: '3 hours' },
+           { value: 2*60*60, name: '2 hours' },
+           { value: 1*60*60, name: '1 hours' },
+           { value: 45*60, name: '45 minutes' },
+           { value: 30*60, name: '30 minutes' },
+           { value: 15*60, name: '15 minutes' },
+           { value: 10*60, name: '10 minutes' },
+           { value: 5*60, name: '5 minutes' },
+           { value: 1*60, name: '1 minute' },
+         ];
+         $scope.data.frequency = $scope.frequencies[0];
+
+         $scope.onStormSelect=function(name) {
+           var startadvIdx = $scope.storms[name]['minstartadv'] - 1;
+           var endadvIdx = $scope.storms[name]['maxendadv'] - 1;
+           $scope.options = [];
+           for (let i = $scope.storms[name]['minstartadv']; i <= $scope.storms[name]['maxendadv']; i++) {
+             $scope.options.push({value: i, name: "Advisory " + i});
+           }
+           $scope.data.startadv = $scope.options[0];
+           $scope.data.endadv   = $scope.options[endadvIdx];
+         }
+
+         // update existing item to server
+         $scope.doLogin=function() { 
+           var data = {
+                        name:$scope.data.name,
+                        frequency:$scope.data.frequency.value,
+                        startadv:$scope.data.startadv.value,
+                        endadv:$scope.data.endadv.value,
+                        loop:$scope.data.loop,
+                        notify:$scope.data.notify,
+                        email:$scope.data.email
+                      };
+           $http.post(baseAPIUrl+'api/configure', JSON.stringify(data)).then(
+             /* handle success */
+             function (response) {
+               window.location.replace(baseAPIUrl + 'status');
+             },
+             /* handle error */
+             function (response) {
+               if ("409" == response.status) {
+                 $scope.error.message = "Storm already configured. Choose a different storm and try again.";
+                 $scope.error.color   = "red";
+                 alert($scope.error.message);
+               }
+             }
+           );
+         }; 
+     }]);
+
+    </script>

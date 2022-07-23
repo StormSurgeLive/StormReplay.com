@@ -1,0 +1,51 @@
+    <h2>The storm after the storm...</h2>
+    <i>This site provides functionality for "replaying" storms for which the <a href=https://www.nhc.noaa.gov/ target=_other>National Hurricane Center</a> has issued advisories for use with off season <a href=https://github.com/StormSurgeLive/asgs target=_other>ASGS</a> testing and tropical event planning for synthetic
+    storms</i>
+    <br/>
+    <br/>
+    <div ng-app="loginApp" ng-controller="listController" align=left>
+      <form id="login_form" name="login_form">
+        <table border=1>
+          <tr>
+            <td> Username: </td>
+            <td> <input type="text" ng-model="username" placeholder="Username" class="form-control"> </td>
+          </tr>
+          <tr>
+            <td> Password: </td>
+            <td> <input type="password" ng-model="password" placeholder="Password" class="form-control"> </td>
+          </tr>
+          <tr>
+            <td colspan=2 align=right>
+              <button ng-click="doLogin()" class="btn btn-info">Login</button>
+            </td>
+          </tr>
+        </table>
+      </form>
+    </div>
+    <br/>
+    <i><a href=mailto: >request an account</a></i>
+    <br/>
+
+    <script>
+     /* AngularJS Application Controller */
+     var loginApp=angular.module('loginApp',[]);
+     loginApp.controller('listController', ['$scope', '$http', function ($scope, $http) {
+         var baseAPIUrl = getBaseURL(); 
+         // update existing item to server
+         $scope.doLogin=function() { 
+           var data = { username:$scope.username, password:$scope.password };
+           $http.post(baseAPIUrl+'api/login', JSON.stringify(data)).then(
+             /* handle success */
+             function (response) {
+               window.location.replace(baseAPIUrl + 'status');
+             },
+             /* handle error */
+             function (response) {
+               $scope.serverResponse = "Update Failed: " + response.message;
+               $scope.serverResponseColor = "red";
+             }
+           );
+         }; 
+     }]);
+
+    </script>

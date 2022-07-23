@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title><% title %> ~ StormReplay.com ~ The storm after the storm. </title>
+    <script src="/js/angular/1.8.2/angular.min.js"></script>
+    <script>
+     function getBaseURL() {
+         var url = location.href;  // entire url including querystring - also: window.location.href;
+         var baseURL = url.substring(0, url.indexOf('/', 14));
+         if (baseURL.indexOf('http://localhost') != -1) {
+             // Base Url for localhost
+             var url = location.href;  // window.location.href;
+             var pathname = location.pathname;  // window.location.pathname;
+             var index1 = url.indexOf(pathname);
+             var index2 = url.indexOf("/", index1 + 1);
+             var baseLocalUrl = url.substr(0, index2);
+             return baseLocalUrl + "/";
+         }
+         else {
+             // Root Url for domain name
+             return baseURL + "/";
+         }
+     }
+    </script>
+  </head>
+  <body bgcolor=azure>
+    <table width="100%">
+      <tr>
+        <td align=left>
+        <% IF member.username.defined -%>
+          [
+           <a href=/new>new</a>       ::
+           <a href=/status>status</a> ::
+           <a href=/stormlist>archive</a> ::
+           <a href=/home>settings</a>
+          ]
+        <% ELSE -%>
+          [
+           <a href=mailto:>join</a> ::
+           <a href=/>login</a>
+          ]
+        <% END -%>
+        </td>
+        <td align=right> 
+        <% IF member.username.defined -%>
+           logged in as, <i><% member.username -%></i> ~
+           <a href=/logout>logout</a>
+        <% END -%>
+        </td>
+      </tr>
+    </table>
+    <% content %>
+    <br/>
+    <hr/>
+    <div id="footer">
+      In association with:
+      <ul>
+        <li><a href=https://github.com/StormSurgeLive/asgs target=_other>ADCIRC Storm Guidance System</a></li>
+	<li><a href=https://stormsurge.live target=_other>Storm Surge Live</a></li>
+	<li><a href=https://cera.coastalrisk.live target=_other>CERA Coastal Risk</a></li>
+      </ul>
+    </div>
+    <hr>
+    <div align=center>
+      <i>Disclaimer: Service intended for entertainment purposes only. No meteorologists were harmed during the making of these fake storms.</i>
+      <br/>
+      <i>Copyright 2021-<font size=5>&infin;</font></i>
+    </div>
+  </body>
+</html>

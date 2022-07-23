@@ -1,0 +1,23 @@
+    <h2>List of Supported Storms</h2>
+
+    <table border=1>
+      <tr>
+         <th>Name</th>
+         <th>Year</th>
+         <th>Start</th>
+         <th>Ending</th>
+       </tr>
+       <% FOREACH storm IN storms.keys.sort -%>
+       <tr>
+         <td><% storm.ucfirst -%></td>
+         <td><% storms.$storm.year -%></td>
+         <td align=right><% storms.$storm.minstart -%></td>
+         <td align=right><% storms.$storm.maxend -%></td>
+       </tr>
+       <% END -%>
+    </table>
+    <p/>
+    <p/>
+    Note: "<i>Supported</i>" means that the storm's historical advisory and best track data
+    have been prepared for use with the <i>replay</i> system presented here.
+     
