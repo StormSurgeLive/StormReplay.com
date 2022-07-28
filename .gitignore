@@ -1,0 +1,6 @@
+*.sw*
+*/public/rss/*
+passwd.yaml
+*.pid
+errors*
+ReplayServerApp/config.yml
