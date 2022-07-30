@@ -30,10 +30,10 @@
           <tr>
             <td align=left>
               Nowification Interval
-              <br/><font size=2 color=gray>Specifies the time interval of the data records produced.</font>
+              <br/><font size=2 color=gray>Specifies the time nowificationInterval of the data records produced.</font>
             </td>
             <td align=left>
-              <select name="selectNowificationInterval" id="selectNowificationInterval" ng-options="interval.name for interval in intervals track by interval.value" ng-model="data.interval"></select>
+              <select name="selectNowificationInterval" id="selectNowificationInterval" ng-options="nowificationInterval.name for nowificationInterval in nowificationIntervals track by nowificationInterval.value" ng-model="data.nowificationInterval"></select>
             </td>
           </tr>
           <tr>
@@ -58,8 +58,8 @@
           </tr>
           <tr>
             <td colspan=2 align=left>
-              <input type=checkbox ng-model="data.truehindcast"/>
-              <i>True <i>hindcast</i> (don't <i>nowify</i>)
+              <input type=checkbox ng-model="data.nowify"/>
+              <i>Nowify</i>
               <br/>
               <input type=checkbox ng-model="data.loop"/>
               <i>Loop storm until stopped manually</i> 
@@ -71,7 +71,7 @@
           </tr>
           <tr>
             <td bgcolor=lightgreen colspan=2 align=center ng-if="data.name && data.startadv && data.endadv && data.frequency">
-              <button ng-click="doLogin()">Start Storm!</button>
+              <button ng-click="doStart()">Start Storm!</button>
             </td>
           </tr>
         </table>
@@ -93,9 +93,10 @@
          $scope.storms = <% stormJSON -%>;
          $scope.options = [];
 
-         $scope.intervals = [
-           { value: 6*60*60, name: '6 hours' },
-           { value: 3*60*60, name: '3 hours' },
+         $scope.nowificationIntervals = [
+           { value: 6*60*60, name: '6 hours' }
+/*
+          ,{ value: 3*60*60, name: '3 hours' },
            { value: 2*60*60, name: '2 hours' },
            { value: 1*60*60, name: '1 hours' },
            { value: 45*60, name: '45 minutes' },
@@ -104,8 +105,9 @@
            { value: 10*60, name: '10 minutes' },
            { value: 5*60, name: '5 minutes' },
            { value: 1*60, name: '1 minute' },
+*/
          ];
-         $scope.data.interval = $scope.intervals[0];
+         $scope.data.nowificationInterval = $scope.nowificationIntervals[0];
 
          $scope.frequencies = [
            { value: 6*60*60, name: '6 hours' },
@@ -121,6 +123,9 @@
          ];
          $scope.data.frequency = $scope.frequencies[0];
 
+         // Nowify is true by default
+         $scope.data.nowify = true;
+
          $scope.onStormSelect=function(name) {
            var startadvIdx = $scope.storms[name]['minstartadv'] - 1;
            var endadvIdx = $scope.storms[name]['maxendadv'] - 1;
@@ -133,16 +138,18 @@
          }
 
          // update existing item to server
-         $scope.doLogin=function() { 
+         $scope.doStart=function() { 
            var data = {
-                        name:$scope.data.name,
-                        frequency:$scope.data.frequency.value,
-                        startadv:$scope.data.startadv.value,
-                        endadv:$scope.data.endadv.value,
-                        loop:$scope.data.loop,
-                        notify:$scope.data.notify,
-                        email:$scope.data.email
-                      };
+             name:$scope.data.name,
+             frequency:$scope.data.frequency.value,
+             nowificationInterval:$scope.data.nowificationInterval.value,
+             startadv:$scope.data.startadv.value,
+             endadv:$scope.data.endadv.value,
+             loop:$scope.data.loop,
+             nowify:$scope.data.nowify,
+             notify:$scope.data.notify,
+             email:$scope.data.email
+           };
            $http.post(baseAPIUrl+'api/configure', JSON.stringify(data)).then(
              /* handle success */
              function (response) {

@@ -1,6 +1,5 @@
 package StormSurgeLive::ReplayServer;
 use Dancer2;
-
 use YAML qw/LoadFile/;
 use FindBin qw/$Bin/;
 use Digest::MD5 qw/md5_hex/;

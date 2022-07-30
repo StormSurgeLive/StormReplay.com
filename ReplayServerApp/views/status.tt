@@ -19,7 +19,8 @@
             <th>Current Adv</th>
             <th>End Adv</th>
             <th>Loop?</th>
-            <th>Frequency</th>
+            <th>Issue Freq.</th>
+            <th>Data Interval</th>
             <th>Actions</th>
           </tr>
           <% FOREACH stormName IN details.keys.sort -%>
@@ -31,6 +32,7 @@
             <td><i><% details.$stormName.config.replayd.ENDADV -%></i>...</td>
             <td><i><% IF details.$stormName.config.replayd.LOOP == 1 -%> yes <% ELSE -%> no <% END -%></i></td>
             <td><i><% details.$stormName.config.replayd.FREQUENCY -%></i>...</td>
+            <td><i><% details.$stormName.config.replayd.NOWIFICATIONINTERVAL -%></i>...</td>
             <td align=center>
               <button ng-click="doDelete('<% details.$stormName.config.replayd.NAME -%>')">Delete</button>
               <button ng-click="doNext('<% details.$stormName.config.replayd.NAME -%>')">Next</button>

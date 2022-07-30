@@ -30,6 +30,31 @@ sub new {
     return $self;
 }
 
+# TODO - will break if used with replayd
+sub dont_nowify {
+    my ( $self, $o ) = @_;
+    #h2o $o, qw/advStart advEnd fstBasin btkBasin frequency newDir newStart newStorm newName oldDir oldStorm oldYear/;
+    h2o $o, qw/newDir oldDirr/;
+
+    my $old_dir = $o->oldDir;
+    my $new_dir = $o->newDir;
+
+    # make destination directory if it doesn't exist
+    if ( not -d $new_dir ) {
+        File::Path::make_path($new_dir);
+    }
+
+    foreach my $file (glob(qq{$old_dir/*.dat})) {
+      File::Copy::copy($file, $new_dir);
+    }
+
+    foreach my $file (glob(qq{$old_dir/*.xml})) {
+      File::Copy::copy($file, $new_dir);
+    }
+
+    return 1;
+}
+
 sub nowify {
     my ( $self, $o ) = @_;
     h2o $o, qw/advStart advEnd fstBasin btkBasin frequency newDir newStart newStorm newName oldDir oldStorm oldYear/;
@@ -322,7 +347,7 @@ sub _update_rss {
 
     print qq{New advisory date: $new_line6\n} if $self->{DEBUG};
 
-    my $old_line6 = (split /\n/, $description)[5];
+    my $old_line6 = (split /\n/, $description)[6];
     $description =~ s/$old_line6/$new_line6/g;
 
     # get all date strings of the form "DD/HH00Z" (not unique)
