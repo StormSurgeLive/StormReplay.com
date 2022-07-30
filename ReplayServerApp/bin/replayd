@@ -328,7 +328,7 @@ sub running {
 
         }
 
-        update_status( status => $o->status, status_file => $o->status_file, last_adv => $current_adv, current_adv => $next_adv, next_adv => $next_next_adv );
+        update_status( new_status => $o->state, status => $o->status, status_file => $o->status_file, last_adv => $current_adv, current_adv => $next_adv, next_adv => $next_next_adv );
 
         issue_advisory( $o->config, $o->status, $o->schedule );
 
@@ -414,9 +414,6 @@ sub issue_advisory {
     my $rss_dest     = _rss_dest( $config, $status );
     my $rss_filename = _rss_filename( $config, $status );
     my $rss_file     = sprintf qq{%s/%s}, $rss_dest, $rss_filename;
-
-    print qq{Copying $btk_src ...\n};
-    print qq{Copying $rss_src ...\n};
 
     # shove things into FTP via docker container (not as portable as direct FTP interaction)
     my $exit = system(qq{docker exec vsftpd mkdir -p $btk_dest});
