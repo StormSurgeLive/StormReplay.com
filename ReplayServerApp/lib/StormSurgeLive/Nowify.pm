@@ -31,9 +31,9 @@ sub new {
 }
 
 # TODO - will break if used with replayd
-sub dont_nowify {
+sub just_copy_dont_nowify {
     my ( $self, $o ) = @_;
-    #h2o $o, qw/advStart advEnd fstBasin btkBasin frequency newDir newStart newStorm newName oldDir oldStorm oldYear/;
+
     h2o $o, qw/newDir oldDirr/;
 
     my $old_dir = $o->oldDir;

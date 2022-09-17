@@ -12,9 +12,9 @@ use POSIX qw//;
 use File::Path qw/make_path/;
 use File::Copy qw//;
 use File::Temp qw//;
-use Util::H2O::More  qw/h2o opt2h2o/;
-use XML::RSS   qw//;
-use YAML       qw/Load/;
+use Util::H2O::More qw/h2o opt2h2o/;
+use XML::RSS qw//;
+use YAML qw/Load/;
 use Config::Tiny ();
 use Getopt::Long;
 use StormSurgeLive::Nowify qw//;
@@ -32,12 +32,13 @@ sub dddie {
 }
 
 my @options = (qw/appconfig=s configdir=s statusdir=s wait=i DEBUG/);
-my $opts = h2o {
+my $opts    = h2o {
     appconfig => qq{$Bin/../config.yml},    # this is the Dancer2 app config
     configdir => q{},                       # directory to look for storm configs
     statusdir => q{},                       # directory to look for storm status files
     wait      => 1,                         # check interview, defaults to 15 seconds
-}, opt2h2o(@options);
+  },
+  opt2h2o(@options);
 Getopt::Long::GetOptionsFromArray( \@ARGV, $opts, @options );
 
 # load configuration options that are contained in the
@@ -48,7 +49,7 @@ my $appconfig = YAML::LoadFile( $opts->appconfig );
 h2o -recurse, $appconfig;
 
 # global notifier client
-my $notifier = StormSurgeLive::Notify->new( { %{$appconfig->notify->email} } );
+my $notifier = StormSurgeLive::Notify->new( { %{ $appconfig->notify->email } } );
 
 # if not set in $opts, get from $appconfig
 if ( not $opts->configdir ) {
@@ -77,15 +78,16 @@ while (1) {
             my $config_file = $configs->$uuid->$storm->config;
             my $status_file = $configs->$uuid->$storm->status;
 
-	    # touch files that indicate actions fo replay to perform; can be added by any tool
-	    # but are were originally meant to be used by the web application to communicate
-	    # with replayd
-	    my $touch_files = h2o {
-              delete  => (exists $configs->$uuid->$storm->{delete}) ? $configs->$uuid->$storm->delete : undef,
-              nextAdv => (exists $configs->$uuid->$storm->{nextAdv}) ? $configs->$uuid->$storm->nextAdv : undef,
-            };
+            # handle any actions sent over via touch file
+            my $actions = h2o {}, qw/delete nextAdv action/;
+            foreach my $action (qw/nextAdv delete/) {
+                if ( exists $configs->$uuid->$storm->{$action} ) {
+                  $actions->$action($configs->$uuid->$storm->$action);
+                  $actions->action($action); # always set, last setter wins for now
+                }
+            }
 
-            _dispatch_storm( $schedule, $tick, $storm, $config_file, $status_file, $touch_files);
+            _dispatch_storm( $schedule, $tick, $storm, $config_file, $status_file, $actions );
         }
     }
 
@@ -100,59 +102,75 @@ while (1) {
 
 # dispatches action method based on current state and other things
 sub _dispatch_storm {
-    my ( $schedule, $tick, $storm, $config_file, $status_file, $touch_files ) = @_;
+    my ( $schedule, $tick, $storm, $config_file, $status_file, $actions ) = @_;
 
-    my $config = h2o -recurse,-nolock, { %{ Config::Tiny->read($config_file) } };
+    my $config = h2o -recurse, -nolock, { %{ Config::Tiny->read($config_file) } };
     my $status = h2o -recurse, { %{ Config::Tiny->read($status_file) } };
-    my $uuid   = $config->replayd->MD5;
+    my $uuid   = $config->replayd->UUID;
 
-    # update run state so proper state method is dispatched
-    # TODO: make touch file thing into a dispatch
-    if ($touch_files->delete) {
-      my $status = h2o -recurse, { %{ Config::Tiny->read($status_file) } };
-      update_status( status => $status, status_file => $status_file, new_status => q{DELETING} );
-      unlink $touch_files->delete;
-      return 1; ## return early
-    }
-    elsif ($touch_files->nextAdv) {
-      # update next adv time
-      update_schedule( schedule => $schedule, tick => $tick, uuid => $uuid, storm => $storm, frequency => 0 );
-      # delete .nextAdv file
-      unlink $touch_files->nextAdv;
-      return 1; ## return early
+    # update run state so proper state method is dispatched, ... this block
+    # necessarily need to be updated as more "touch files" are added
+  ACTION_DISPATCH:
+    {
+        my $ACTION = ($actions->action) ? uc $actions->action : undef;
+        my $ACTION_DISPATCH = {
+            DELETE => {
+              action => sub {
+                my $status = h2o -recurse, { %{ Config::Tiny->read($status_file) } };
+                update_status( status => $status, status_file => $status_file, new_status => q{DELETING} );
+                unlink $actions->delete;
+                1;    ## return early, otherwise make 0
+              }, 
+              ret => 1, # return immediately to caller
+            },
+            NEXTADV => {
+              action => sub {
+                # update next adv time
+                update_schedule( schedule => $schedule, tick => $tick, uuid => $uuid, storm => $storm, frequency => 0 );
+                # delete .nextAdv file
+                unlink $actions->nextAdv;
+                1;    ## return early, otherwise make 0
+              },
+              ret => 1, # return immediately to caller
+           }, 
+        };
+        if ( $ACTION and $ACTION_DISPATCH->{$ACTION} ) {
+            my $ret_val = $ACTION_DISPATCH->{$ACTION}->{action}->();
+            return $ret_val if $ACTION_DISPATCH->{$ACTION}->{ret};  #<~ immediate return to caller handled here
+        }
     }
 
     # treats STATE in .status as a real "state"; match then executes
     # (this is basically a finite state machine below)
     my %params = (
-        schedule     => $schedule,
-        tick         => $tick,
-        uuid         => $uuid,
-        storm        => $storm,
-        config       => $config,
-        status       => $status,
-        config_file  => $config_file,
-        status_file  => $status_file,
-        DEBUG        => $opts->DEBUG,
+        schedule    => $schedule,
+        tick        => $tick,
+        uuid        => $uuid,
+        storm       => $storm,
+        config      => $config,
+        status      => $status,
+        config_file => $config_file,
+        status_file => $status_file,
+        DEBUG       => $opts->DEBUG,
     );
     my $dispatch = {
         q{NEED2NOWIFY} => sub {
-	    if ( $config->replayd->NOWIFY ) {
-              print qq{$tick (info) Nowifying $storm for $uuid ...\n};
-              do_nowify( %params );
-	    }
-	    else {
-              printf qq{$tick (info) Nowification disabled for %s ... issuing original storm data \n}, $config->replayd->NAME;
-              dont_nowify( %params );
+            if ( $config->replayd->NOWIFY ) {
+                print qq{$tick (info) Nowifying $storm for $uuid ...\n};
+                do_nowify(%params);
+            }
+            else {
+                printf qq{$tick (info) Nowification disabled for %s ... issuing original storm data \n}, $config->replayd->NAME;
+                just_copy_dont_nowify(%params);
             }
             update_schedule( %params, frequency => 0 );
             update_status( %params, new_status => q{FIRSTRUN} );
         },
-        q{FIRSTRUN} => sub { first_run( %params )   },
-        q{RUNNING}  => sub { running( %params )     },
-        q{ENDING}   => sub { ending( %params )      },
-        q{DELETING} => sub { delete_storm( %params )},
-        q{ENDED}    => sub { maybe_reinit( %params )  },
+        q{FIRSTRUN} => sub { first_run(%params) },
+        q{RUNNING}  => sub { running(%params) },
+        q{ENDING}   => sub { ending(%params) },
+        q{DELETING} => sub { delete_storm(%params) },
+        q{ENDED}    => sub { maybe_reinit(%params) },
     };
 
     my $_state = $status->status->STATE;
@@ -168,12 +186,12 @@ sub delete_storm {
     my $o    = h2o \%opts, qw/schedule tick uuid storm config status status_file state config_file/;
     printf qq{%s (info) Deleting %s for %s ...\n}, $tick, $o->config->replayd->NAME, $o->uuid;
     my $btk_dest = _btk_dest( $o->config, $o->status );
-    my $btk_file = sprintf(qq{%s/%s}, $btk_dest, _btk_filename( $o->config, $o->status ));
+    my $btk_file = sprintf( qq{%s/%s}, $btk_dest, _btk_filename( $o->config, $o->status ) );
 
     # delete files
-    unlink grep { -e $_ } ($o->status_file, $o->config_file, $btk_file);
+    unlink grep { -e $_ } ( $o->status_file, $o->config_file, $btk_file );
 
-    my $storm_designation = _nhc_storm_designation($o->config, $o->status);
+    my $storm_designation = _nhc_storm_designation( $o->config, $o->status );
 
     # determine path
     my $rss_src      = _rss_src( $o->config, $o->status );
@@ -189,8 +207,8 @@ sub delete_storm {
 
     if ( defined $storm_index ) {
         printf qq{%s (info) Deleting %s (%s) at position %s RSS file ... \n}, $tick, $o->config->replayd->NAME, $storm_designation, $storm_index;
-        splice @{$dest_rss->{items}}, $storm_index, 1;
-        _replace_rss($dest_rss, $rss_file);
+        splice @{ $dest_rss->{items} }, $storm_index, 1;
+        _replace_rss( $dest_rss, $rss_file );
     }
 
     # delete nowified data
@@ -199,8 +217,8 @@ sub delete_storm {
     opendir( my $dh, $now_dir ) || die qq{Can't opendir nowified storm dir for delete, "$now_dir": $!};
   READDIR_LOOP:
     foreach my $file ( readdir($dh) ) {
-      next READDIR_LOOP if grep { m/$file/ } (qw/. ../);
-      unlink sprintf(q{%s/%s}, $now_dir, $file) || warn $!; 
+        next READDIR_LOOP if grep { m/$file/ } (qw/. ../);
+        unlink sprintf( q{%s/%s}, $now_dir, $file ) || warn $!;
     }
     rmdir $now_dir || warn $!;
 
@@ -208,7 +226,7 @@ sub delete_storm {
 }
 
 sub _nhc_storm_designation {
-    my ($config, $status) = @_;
+    my ( $config, $status ) = @_;
     my $_rss_basin = $config->replayd->RSS_BASIN;
     my $_nhc_basin = $config->replayd->NHC_BASIN;
     my $_storm     = $config->replayd->NUMBER;
@@ -222,7 +240,7 @@ sub _nhc_storm_designation {
 
 sub _remove_from_rss {
     my %opts = @_;
-    my $o = h2o \%opts, qw/config src_file dest_file/;
+    my $o    = h2o \%opts, qw/config src_file dest_file/;
 
     # if $dest_file doesn't exist, copy the file directly
     if ( not -e $o->dest_file ) {
@@ -230,15 +248,15 @@ sub _remove_from_rss {
         return 1;
     }
 
-    my $storm_designation = _nhc_storm_designation($o->config, $o->status);
+    my $storm_designation = _nhc_storm_designation( $o->config, $o->status );
 
     # open src via XML parser
     my $src_rss = XML::RSS->new;
-    $src_rss->parsefile($o->src_file);
+    $src_rss->parsefile( $o->src_file );
 
     # open dest (if it exists) via XML parser
     my $dest_rss = XML::RSS->new;
-    $dest_rss->parsefile($o->dest_file);
+    $dest_rss->parsefile( $o->dest_file );
 
     # insert new entry - assumed here to not be in conflict with anything that is
     # currently in $src_rss->{items}
@@ -259,7 +277,7 @@ sub _remove_from_rss {
   REPLACE_CURRENT_XML:
     {
         # write index-at.xml to a temporary file, them perform an atomic mv
-	my ($fh, $tmp_file) = File::Temp::tempfile();
+        my ( $fh, $tmp_file ) = File::Temp::tempfile();
         $dest_rss->save($tmp_file);
 
         # perform atomic mv to overwrite existing file
@@ -310,9 +328,9 @@ sub running {
         update_schedule( schedule => $o->schedule, tick => $o->tick, uuid => $o->uuid, storm => $o->storm, frequency => $o->config->replayd->FREQUENCY );
 
         # update next, next-next ADVs
-	my $current_adv = $o->status->status->CURRENTADV;
-        my $next_adv = next_advisory( $o->config, $o->status );
-	my $next_next_adv = $next_adv + 1;
+        my $current_adv   = $o->status->status->CURRENTADV;
+        my $next_adv      = next_advisory( $o->config, $o->status );
+        my $next_next_adv = $next_adv + 1;
 
         # move to ENDING if this is the next to last advisory
         if ( $next_adv == $o->config->replayd->ENDADV ) {
@@ -322,9 +340,9 @@ sub running {
         elsif ( $next_adv > $o->config->replayd->ENDADV ) {
             $o->state(q{ENDED});
             printf qq{%s (info) %s ended at advisory %d.\n}, $o->tick, $o->storm, $current_adv;
-	    $next_next_adv = $o->status->status->CURRENTADV;
+            $next_next_adv = $o->status->status->CURRENTADV;
             update_status( status => $o->status, status_file => $o->status_file, new_status => $o->state, next_adv => $next_adv );
-            return; # no longer issuing, so return out of this sub
+            return;    # no longer issuing, so return out of this sub
 
         }
 
@@ -332,14 +350,14 @@ sub running {
 
         issue_advisory( $o->config, $o->status, $o->schedule );
 
-	$current_adv = $o->status->status->CURRENTADV;
+        $current_adv = $o->status->status->CURRENTADV;
 
         my $msg = sprintf qq{%s (info) Issuing Advisory %s %s for %s ...\n}, $o->tick, $current_adv, $o->storm, $o->uuid;
 
         print $msg;
 
         my $subject = sprintf qq{(info) Issuing Advisory %s %s}, $current_adv, $o->storm;
-        _notify_if($notifier, $o, $subject, $msg);
+        _notify_if( $notifier, $o, $subject, $msg );
 
     }
 
@@ -356,14 +374,14 @@ sub maybe_reinit {
     my %opts = @_;
     my $o    = h2o \%opts, qw/schedule tick uuid storm config status status_file state/;
     if ( $o->config->replayd->LOOP and $o->status->status->STATE ne q{NEED2NOWIFY} ) {
-      running( @_, state => q{NEED2NOWIFY} );
+        running( @_, state => q{NEED2NOWIFY} );
     }
 }
 
 sub next_advisory {
     my ( $config, $status ) = @_;
     my $next_adv = $status->status->NEXTADV;
-    my $ret = ( not $next_adv or $next_adv eq q{NaN} ) ? $config->replayd->STARTADV :  $next_adv;
+    my $ret      = ( not $next_adv or $next_adv eq q{NaN} ) ? $config->replayd->STARTADV : $next_adv;
     return $ret;
 }
 
@@ -381,7 +399,7 @@ sub _btk_src {
 
 sub _btk_dest {
     my ( $config, $status ) = @_;
-    return sprintf( qq{%s%s/%s}, $config->replayd->FTP_ROOT, $config->replayd->FTP_HDIR, $config->replayd->MD5 );
+    return sprintf( qq{%s%s/%s}, $config->replayd->FTP_ROOT, $config->replayd->FTP_HDIR, $config->replayd->UUID );
 }
 
 sub _rss_filename {
@@ -400,7 +418,7 @@ sub _rss_src {
 sub _rss_dest {
     my ( $config, $status ) = @_;
     my $_rss_filename = _rss_filename( $config, $status );
-    my $destdir = sprintf(qq{%s/../public/rss/%s}, $Bin, $config->replayd->MD5);
+    my $destdir       = sprintf( qq{%s/../public/rss/%s}, $Bin, $config->replayd->UUID );
     return $destdir;
 }
 
@@ -421,7 +439,7 @@ sub issue_advisory {
 
     # RSS served via Dancer
     if ( not -d $rss_dest ) {
-      make_path(qq{$rss_dest}, 1, 0755);
+        make_path( qq{$rss_dest}, 1, 0755 );
     }
 
     # handles merging RSS in the face of more than 1 storm
@@ -432,7 +450,7 @@ sub issue_advisory {
 
 sub _insert_into_rss {
     my %opts = @_;
-    my $o = h2o \%opts, qw/config src_file dest_file/;
+    my $o    = h2o \%opts, qw/config src_file dest_file/;
 
     # if $dest_file doesn't exist, copy the file directly
     if ( not -e $o->dest_file ) {
@@ -454,11 +472,11 @@ sub _insert_into_rss {
 
     # open src via XML parser
     my $src_rss = XML::RSS->new;
-    $src_rss->parsefile($o->src_file);
+    $src_rss->parsefile( $o->src_file );
 
     # open dest (if it exists) via XML parser
     my $dest_rss = XML::RSS->new;
-    $dest_rss->parsefile($o->dest_file);
+    $dest_rss->parsefile( $o->dest_file );
 
     # insert new entry - assumed here to not be in conflict with anything that is
     # currently in $src_rss->{items}
@@ -476,7 +494,7 @@ sub _insert_into_rss {
         push( @{ $dest_rss->{items} }, $replacement_item );
     }
 
-    _replace_rss($dest_rss, $o->dest_file);
+    _replace_rss( $dest_rss, $o->dest_file );
 
     return;
 }
@@ -496,12 +514,12 @@ sub _replace_rss {
 # used by _insert_into_rss to determine if storm is in XML forecast file
 #   and if so, where so it can be replaced
 sub _find_index {
-    my (  $storm_designation, $dest_rss ) = @_;
+    my ( $storm_designation, $dest_rss ) = @_;
     my $index;
   FIND_ENTRY:
     foreach my $item ( @{ $dest_rss->{items} } ) {
         if ( $item->{description} =~ m/$storm_designation/gm ) {
-            $index //= 0; # sets index to 0th element if not set;
+            $index //= 0;    # sets index to 0th element if not set;
             last FIND_ENTRY;
         }
         ++$index;
@@ -530,7 +548,7 @@ sub update_status {
 
 sub _get_now_dir {
     my ( $config, $status ) = @_;
-    my $new_dir = sprintf( qq{%s/%s/%s}, $config->replayd->NOWBASE, $config->replayd->MD5, $config->replayd->NAME );
+    my $new_dir = sprintf( qq{%s/%s/%s}, $config->replayd->NOWBASE, $config->replayd->UUID, $config->replayd->NAME );
     return $new_dir;
 }
 
@@ -540,25 +558,25 @@ sub _get_old_dir {
     return $old_dir;
 }
 
-sub dont_nowify {
+sub just_copy_dont_nowify {
     my %opts   = @_;
     my $o      = h2o \%opts, qw/status config/;
     my $params = {
-        q{advStart}   => $o->config->replayd->STARTADV,
-        q{advSnd}     => $o->config->replayd->ENDADV,
-        q{btkBasin}   => $o->config->replayd->BTK_BASIN,
-        q{fstBasin}   => $o->config->replayd->RSS_BASIN,
-	q{frequency}  => $o->config->replayd->NOWIFICATIONINTERVAL,
-        q{newStorm}   => $o->config->replayd->NUMBER,
-        q{newStart}   => $o->config->replayd->NEWSTART,
-        q{newDir}     => _get_now_dir( $o->config, $o->status ),
-        q{oldDir}     => _get_old_dir( $o->config, $o->status ),
+        q{advStart}  => $o->config->replayd->STARTADV,
+        q{advSnd}    => $o->config->replayd->ENDADV,
+        q{btkBasin}  => $o->config->replayd->BTK_BASIN,
+        q{fstBasin}  => $o->config->replayd->RSS_BASIN,
+        q{frequency} => $o->config->replayd->NOWIFICATIONINTERVAL,
+        q{newStorm}  => $o->config->replayd->NUMBER,
+        q{newStart}  => $o->config->replayd->NEWSTART,
+        q{newDir}    => _get_now_dir( $o->config, $o->status ),
+        q{oldDir}    => _get_old_dir( $o->config, $o->status ),
     };
 
     my $nowify = StormSurgeLive::Nowify->new( DEBUG => $o->DEBUG );
 
     local $@;
-    my $ret = eval { $nowify->dont_nowify($params) } or undef;
+    my $ret = eval { $nowify->just_copy_dont_nowify($params) } or undef;
     if ( not $ret or $@ ) {
         printf qq{$tick (info) %s\n}, ($@) ? $@ : q{Unknown};
     }
@@ -570,15 +588,15 @@ sub do_nowify {
     my %opts   = @_;
     my $o      = h2o \%opts, qw/status config/;
     my $params = {
-        q{advStart}   => $o->config->replayd->STARTADV,
-        q{advSnd}     => $o->config->replayd->ENDADV,
-        q{btkBasin}   => $o->config->replayd->BTK_BASIN,
-        q{fstBasin}   => $o->config->replayd->RSS_BASIN,
-	q{frequency}  => $o->config->replayd->NOWIFICATIONINTERVAL,
-        q{newStorm}   => $o->config->replayd->NUMBER,
-        q{newStart}   => $o->config->replayd->NEWSTART,
-        q{newDir}     => _get_now_dir( $o->config, $o->status ),
-        q{oldDir}     => _get_old_dir( $o->config, $o->status ),
+        q{advStart}  => $o->config->replayd->STARTADV,
+        q{advSnd}    => $o->config->replayd->ENDADV,
+        q{btkBasin}  => $o->config->replayd->BTK_BASIN,
+        q{fstBasin}  => $o->config->replayd->RSS_BASIN,
+        q{frequency} => $o->config->replayd->NOWIFICATIONINTERVAL,
+        q{newStorm}  => $o->config->replayd->NUMBER,
+        q{newStart}  => $o->config->replayd->NEWSTART,
+        q{newDir}    => _get_now_dir( $o->config, $o->status ),
+        q{oldDir}    => _get_old_dir( $o->config, $o->status ),
     };
 
     my $nowify = StormSurgeLive::Nowify->new( DEBUG => $o->DEBUG );
@@ -596,7 +614,7 @@ sub get_configs {
     my $storms_configs = {};
     my $configdir      = $opts->configdir;
     if ( not -d $configdir ) {
-       mkdir $configdir || die qq{'$configdir' does not exist, error creating it: $!\n};
+        mkdir $configdir || die qq{'$configdir' does not exist, error creating it: $!\n};
     }
     opendir( my $dh, $configdir );
   READDIR_LOOP:

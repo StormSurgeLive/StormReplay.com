@@ -1,4 +1,3 @@
-    <h2>New Storm Configuration</h2>
     <div ng-app="newStormApp" ng-controller="listController">
       <form ng-model="new_storm_form" name="new_storm_form">
         <table border=1 width=545>
@@ -11,9 +10,9 @@
             <td align=left>
               <select ng-model="data.name" ng-change="onStormSelect(data.name)">
                 <option value="" ng-selected="selected">Select a Storm!</option>
-                <% FOREACH storm IN storms.keys.sort -%>
-                <option value="<% storm -%>"><% storm.ucfirst -%> (<% storms.$storm.year -%>)</option>
-                <% END -%>
+                [% FOREACH storm IN storms.keys.sort -%]
+                <option value="[% storm -%]">[% storm.ucfirst -%] ([% storms.$storm.year -%])</option>
+                [% END -%]
               </select>
               <br/>
             </td>
@@ -27,7 +26,34 @@
               <select name="selectFrequency" id="selectFrequency" ng-options="frequency.name for frequency in frequencies track by frequency.value" ng-model="data.frequency"></select>
             </td>
           </tr>
+            <td align=left>
+              Storm is for an <i>ASGS Hindcast</i>
+              <br/><font size=2 color=gray>Turns off <i>nowification</i>, fixates on the landfall advisory, computes <i>COLDSTARTDATE</i> and <i>HINDCASTENDDATE</i> based on a precise landfall data/time.</font>
+            </td align=left>
+            <td align=left valign=top>
+              <input type=checkbox ng-model="data.isHindcast">
+            </td>
+          </tr>
           <tr>
+            <td colspan=2 align=left>
+              <input type=checkbox ng-model="data.loop"/>
+              <i>Loop storm until stopped manually</i> 
+            </td>
+          </tr>
+          <tr>
+            <td colspan=2 align=left>
+              <input type=checkbox ng-model="data.notify"/>
+              <i>Notify by Email</i> 
+              <span align=right ng-if="data.notify"><input type=text style="height:12px" ng-model="data.email" size=30></span>
+            </td>
+          </tr>
+          <tr ng-hide="data.isHindcast">
+            <td colspan=2 align=left>
+              <input type=checkbox ng-model="data.nowify" ng-checked="!data.isHindcast"/>
+              <i>Nowify</i> (uncheck to skip <i>nowification</i>, off for <i>all</i> hindcasts)
+            </td>
+          </tr>
+          <tr ng-hide="data.isHindcast || !data.nowify">
             <td align=left>
               Nowification Interval
               <br/><font size=2 color=gray>Specifies the time nowificationInterval of the data records produced.</font>
@@ -36,41 +62,28 @@
               <select name="selectNowificationInterval" id="selectNowificationInterval" ng-options="nowificationInterval.name for nowificationInterval in nowificationIntervals track by nowificationInterval.value" ng-model="data.nowificationInterval"></select>
             </td>
           </tr>
-          <tr>
+          <tr ng-hide="data.isHindcast">
             <td align=left> Start Advisory</td align=left>
             <td align=left> 
               <select name="selectStart" id="selectStart" ng-options="option.name for option in options track by option.value" ng-model="data.startadv"></select>
             </td>
           </tr>
-          <tr>
+          <tr ng-hide="data.isHindcast">
             <td align=left> End Advisory</td align=left>
             <td align=left> 
               <select name="selectEnd" id="selectEnd" ng-options="option.name for option in options track by option.value" ng-model="data.endadv"></select>
             </td>
           </tr>
+          <tr ng-hide="data.isHindcast">
             <td align=left> <code>COLDSTARTDATE</code></td align=left>
             <td align=left> tbd</td>
           </tr>
-          </tr>
+          <tr ng-hide="data.isHindcast">
             <td align=left> <code>HINDCASTLENGTH</code></td align=left>
             <td align=left> 30.0</td>
           </tr>
-          </tr>
           <tr>
-            <td colspan=2 align=left>
-              <input type=checkbox ng-model="data.nowify"/>
-              <i>Nowify</i>
-              <br/>
-              <input type=checkbox ng-model="data.loop"/>
-              <i>Loop storm until stopped manually</i> 
-              <br/>
-              <input type=checkbox ng-model="data.notify"/>
-              <i>Notify by Email</i> 
-              <span align=right ng-if="data.notify"><input type=text style="height:12px" ng-model="data.email" size=30></span>
-            </td>
-          </tr>
-          <tr>
-            <td bgcolor=lightgreen colspan=2 align=center ng-if="data.name && data.startadv && data.endadv && data.frequency">
+            <td bgcolor=lightgreen colspan=2 align=center ng-if="(data.name && data.isHindcast) || (data.name && data.startadv && data.endadv && data.frequency)">
               <button ng-click="doStart()">Start Storm!</button>
             </td>
           </tr>
@@ -90,7 +103,7 @@
          $scope.error = {};
 
          // storm JSON placed via templated parameter
-         $scope.storms = <% stormJSON -%>;
+         $scope.storms = [% stormJSON -%];
          $scope.options = [];
 
          $scope.nowificationIntervals = [
@@ -124,7 +137,7 @@
          $scope.data.frequency = $scope.frequencies[0];
 
          // Nowify is true by default
-         $scope.data.nowify = true;
+	 $scope.data.nowify = true;
 
          $scope.onStormSelect=function(name) {
            var startadvIdx = $scope.storms[name]['minstartadv'] - 1;

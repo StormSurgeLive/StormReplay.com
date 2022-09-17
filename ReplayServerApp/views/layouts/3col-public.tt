@@ -1,0 +1,153 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+  <head>
+    <title>StormReplay.com - [% title -%]</title>
+    <link href="/css/main.css" rel="stylesheet" type="text/css" />
+    <script src="/js/angular/1.8.2/angular.min.js"></script>
+    <script>
+     function getBaseURL() {
+         var url = location.href;  // entire url including querystring - also: window.location.href;
+         var baseURL = url.substring(0, url.indexOf('/', 14));
+         if (baseURL.indexOf('http://localhost') != -1) {
+             // Base Url for localhost
+             var url = location.href;  // window.location.href;
+             var pathname = location.pathname;  // window.location.pathname;
+             var index1 = url.indexOf(pathname);
+             var index2 = url.indexOf("/", index1 + 1);
+             var baseLocalUrl = url.substr(0, index2);
+             return baseLocalUrl + "/";
+         }
+         else {
+             // Root Url for domain name
+             return baseURL + "/";
+         }
+     }
+    </script>
+  </head>
+  <body alink="#990000" bgcolor="azure" link="#000000" text="#000000" vlink="#808080">
+    <br/>
+    <table cellpadding="10" width="100%">
+      <tbody>
+      <tr> <td colspan=3 class="menuheading"> S T O R M R E P L A Y . C O M </td> </tr>
+      <tr>
+      <td valign="top" width="100">
+        <div ng-app="loginApp" ng-controller="listController" align=left>
+          <form id="login_form" name="login_form">
+            <table border="1" cellpadding="5" cellspacing="0" width="145" bgcolor#eee>
+              <tr>
+                <td class="menuheading">L O G I N</td>
+              </tr>
+              <tr>
+                <td> <input size=10 type="text" ng-model="username" placeholder="Username" class="form-control"> </td>
+              </tr>
+              <tr>
+                <td> <input size=10 type="password" ng-model="password" placeholder="Password" class="form-control"> </td>
+              </tr>
+              <tr>
+                <td align=right>
+		  <div ng-show="serverResponse" align=left><font color=red size=2>{{ serverResponse }}</font><br/></div>
+                  <button ng-click="serverResponse=null;doLogin()" class="btn btn-info">Login</button>
+                </td>
+              </tr>
+            </table>
+          </form>
+        </div>
+        <br/>
+        <table border="1" cellpadding="5" cellspacing="0" width="145">
+          <tbody>
+          <tr>
+            <td class="menuheading">No Account?</td>
+          </tr>
+          <tr>
+            <td class="leftmenu" nowrap>
+              <a href="/register">Registration</a><br />
+              <a href="/contact">Contact Us</a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <br />
+      <table border="1" cellpadding="5" cellspacing="0" width="145">
+         <tbody>
+           <tr>
+             <td class="menuheading">Other</td>
+           </tr>
+             <tr>
+               <td class="rightmenu">
+                 <a href="/FAQ">FAQ</a><br />
+                 <a href="/about">About?</a>
+               </td>
+             </tr>
+           </tbody>
+         </table>
+         <br />
+       </td>
+       <td valign="top" width="100%"> 
+[% content -%]
+       </td>
+       <td valign="top">
+         <table border="1" cellpadding="5" cellspacing="0" width="145">
+           <tbody>
+           <tr>
+             <td class="menuheading">Related</td>
+           </tr>
+           <tr>
+             <td class="rightmenu">
+	       <a href=https://adcirc.org target=_other>ADCIRC</a><br/>
+	       <a href=https://github.com/StormSurgeLive/asgs target=_other>ASGS</a><br/>
+	       <a href=https://cera.coastalrisk.live target=_other>CERA</a><br/>
+	       <a href=https://stormr.org target=_other>STORMR</a><br/>
+             </td>
+           </tr>
+         </tbody>
+         </table>
+         <br />
+          <table border="1" cellpadding="5" cellspacing="0" width="145">
+            <tbody>
+            <tr>
+              <td class="menuheading">Archives</td>
+            </tr>
+            <tr>
+              <td class="rightmenu"> <a href="/2004/">
+                <a href="/"</a><i>coming soon<br/>
+              </td>
+            </tr>
+            </tbody>
+          </table>
+        </td>
+      </tr>
+      </tbody>
+      <tfooter>
+       <tr>
+         <td colspan=3>
+           <hr>
+           <div align=left>
+             <i>Disclaimer: Service intended for entertainment purposes only. No meteorologists were harmed during the making of these fake storms. Copyright 2021-<font size=5>&infin;</font></i>
+            </div>
+          </td>
+        </tr>
+      </tfooter>
+    </table>
+    <script>
+     /* AngularJS Application Controller */
+     var loginApp=angular.module('loginApp',[]);
+     loginApp.controller('listController', ['$scope', '$http', function ($scope, $http) {
+         var baseAPIUrl = getBaseURL(); 
+         // update existing item to server
+         $scope.doLogin=function() { 
+           var data = { username:$scope.username, password:$scope.password };
+           $http.post(baseAPIUrl+'api/login', JSON.stringify(data)).then(
+             /* handle success */
+             function (response) {
+               window.location.replace(baseAPIUrl + 'status');
+             },
+             /* handle error */
+             function (response) {
+               $scope.serverResponse = "Login Failed";
+             }
+           );
+         }; 
+     }]);
+    </script>
+  </body>
+</html>

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title><% title %> ~ StormReplay.com ~ The storm after the storm. </title>
+    <title>[% title %] ~ StormReplay.com ~ The storm after the storm. </title>
     <script src="/js/angular/1.8.2/angular.min.js"></script>
     <script>
      function getBaseURL() {
@@ -27,29 +27,29 @@
     <table width="100%">
       <tr>
         <td align=left>
-        <% IF member.username.defined -%>
+        [% IF member.username.defined -%]
           [
            <a href=/new>new</a>       ::
            <a href=/status>status</a> ::
            <a href=/stormlist>archive</a> ::
            <a href=/home>settings</a>
           ]
-        <% ELSE -%>
+        [% ELSE -%]
           [
            <a href=mailto:>join</a> ::
            <a href=/>login</a>
           ]
-        <% END -%>
+        [% END -%]
         </td>
         <td align=right> 
-        <% IF member.username.defined -%>
-           logged in as, <i><% member.username -%></i> ~
+        [% IF member.username.defined -%]
+           logged in as, <i>[% member.username -%]</i> ~
            <a href=/logout>logout</a>
-        <% END -%>
+        [% END -%]
         </td>
       </tr>
     </table>
-    <% content %>
+    [% content %]
     <br/>
     <hr/>
     <div id="footer">

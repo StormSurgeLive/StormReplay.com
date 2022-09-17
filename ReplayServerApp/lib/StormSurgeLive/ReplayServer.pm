@@ -1,18 +1,23 @@
 package StormSurgeLive::ReplayServer;
+
+use strict;
+use warnings;
+
 use Dancer2;
+use DBD::SQLite qw//;
+use Crypt::PBKDF2 qw//;
 use YAML qw/LoadFile/;
 use FindBin qw/$Bin/;
-use Digest::MD5 qw/md5_hex/;
 use File::Path qw/make_path/;
 use Util::H2O::More qw/h2o o2h baptise/;
 use Config::Tiny qw//;
 use Digest::SHA qw/sha256_hex/;
 use Digest::MD5 qw/md5_hex/;
 use MIME::Base64 qw/decode_base64/;
-use Net::Address::IP::Local qw//;
 use HTTP::Status qw/:constants :is status_message/;
 use POSIX qw//;
 use POSIX::strptime qw//;
+use Crypt::CBC qw//;
 
 our $VERSION = '0.1';
 
@@ -23,13 +28,13 @@ if ( config->{replayd_base}->{configdir} and not -d config->{replayd_base}->{con
 
 prefix '/' => sub {
     get '' => sub {
-        template 'index' => { title => 'Login' };
+        template 'index' => { title => 'Login' }, { layout => q{3col-public} };
     };
 
     get 'home' => sub {
         my $member = _assert_auth();
 
-        template 'home' => { title => 'Member Home', member => $member };
+        template 'home' => { title => 'Member Home', member => $member }, { layout => q{3col-member} };
     };
 
     # serve index-at.xml by reading file rather than statically (much slower)
@@ -55,7 +60,7 @@ prefix '/' => sub {
         my $storms    = config->{storm_data}->{storms};
         my $stormJSON = encode_json $storms;
 
-        template 'new' => { title => 'Start a Storm', member => $member, storms => $storms, stormJSON => $stormJSON };
+        template 'new' => { title => 'Configure a New Storm', member => $member, storms => $storms, stormJSON => $stormJSON }, { layout => q{3col-member} };
     };
 
     get 'stormlist' => sub {
@@ -64,7 +69,7 @@ prefix '/' => sub {
         # defined in the application configuration
         my $storms = config->{storm_data}->{storms};
 
-        template 'stormlist' => { title => 'Start a Storm', member => $member, storms => $storms };
+        template 'stormlist' => { title => 'Storm Archive Info', member => $member, storms => $storms }, { layout => q{3col-member} };
     };
 
     get 'logout' => sub {
@@ -75,7 +80,7 @@ prefix '/' => sub {
     get 'status' => sub {
         my $member      = _assert_auth();
         my $details_ref = _status($member);
-        template 'status' => { title => 'Storm Statuses', member => $member, details => $details_ref };
+        template 'status' => { title => 'Storm Status', member => $member, details => $details_ref }, { layout => q{3col-member} };
     };
 
     get 'foo' => sub {
@@ -90,11 +95,11 @@ sub _status {
 
     my $details_ref = {};
 
-    my $uid_hash = $member->md5;
+    my $uuid = $member->uuid; 
 
     # get all specific user configs
     opendir( my $dh1, $configdir ) || die "Can't opendir $configdir: $!";
-    my @configfiles = grep { /^$uid_hash/ && -f "$configdir/$_" } readdir($dh1);
+    my @configfiles = grep { /^$uuid/ && -f "$configdir/$_" } readdir($dh1);
     closedir $dh1;
     my @configs = grep { /\.config$/ } @configfiles;
 
@@ -106,7 +111,7 @@ sub _status {
 
     # get all specific user configs
     opendir( my $dh2, $statusdir ) || die "Can't opendir $statusdir: $!";
-    my @statusfiles = grep { /^$uid_hash/ && -f "$statusdir/$_" } readdir($dh2);
+    my @statusfiles = grep { /^$uuid/ && -f "$statusdir/$_" } readdir($dh2);
     closedir $dh2;
     my @details_ref = grep { /\.status$/ } @statusfiles;
 
@@ -145,8 +150,8 @@ prefix '/api' => sub {
     post '/login' => sub {
         my $member = h2o decode_json( request->content ), qw/md5 password username uuid/;
 
-        if ( _authenticate($member) ) {
-            session member => o2h $member;
+        if ( my $urec = _authenticate($member) ) {
+            session member => $urec;
             send_as JSON => { msg => q{OK} };
         }
 
@@ -223,8 +228,8 @@ prefix '/api' => sub {
               base btk_basin endadv md5 name nhc_basin
               notify nowbase nowyear number rss_basin
               source startadv storm year ipaddress
-              nhc_storm hostname httpport loop notify
-              email newstart coldstartdate hindcastlength
+              nhc_storm hostname httpport loop nowify
+              email newstart coldstartdate hindcastlength uuid
               /
         );
 
@@ -235,6 +240,11 @@ prefix '/api' => sub {
             send_error q{Invalid request}, HTTP_BAD_REQUEST;
         }
 
+        # source storm information
+        my $name         = $formdata->name;
+        my $replayd_base = h2o { %{config->{replayd_base}} };
+        my $storm        = h2o { %{config->{storm_data}->{storms}->{$name}} };
+
 	# set some defaults in $formdata
         if ( not $formdata->loop ) {
             $formdata->loop(0);
@@ -242,53 +252,64 @@ prefix '/api' => sub {
 
 	# set time defaults
 	my $time         = time;
-	# year for nowification
-	if (not $formdata->nowyear) {
-          my $nowyear      = POSIX::strftime( "%Y", localtime($time) );
-          $formdata->nowyear($nowyear);
-        }
+
+	# hindcastlength - typically is 30.0 days
+	if (not $formdata->hindcastlength) {
+          $formdata->hindcastlength(30.0);
+	}
+
+	# ASGS' config, COLDSTARTDATE should be 30.0 days prior
+	# to newStart and the ending "HH" *must* be the same, otherwise ASGS'
+	# ./storm_track_gen.pl will not find the starting best track record
+	# and will die
+
+        ## compute COLDSTARTDATE based on original storm's first btk time stamp
+	my $hcl = $formdata->hindcastlength;
+
 	# if not provided, defaults to basically, NOW 
 	if (not $formdata->newstart) {
           my $newstart     = POSIX::strftime( "%Y%m%d%H", localtime($time) );
           $formdata->newstart($newstart);
 	}
-	# hindcastlength - typically is 30.0 days
-	if (not $formdata->hindcastlength) {
-          $formdata->hindcastlength(30.0);
-	}
-	# ASGS' config, COLDSTARTDATE should be 30.0 days prior
-	# to newStart and the ending "HH" *must* be the same, otherwise ASGS'
-	# ./storm_track_gen.pl will not find the starting best track record
-	# and will die
-	if (not $formdata->coldstartdate) {
+
+        if (not $formdata->nowify) {
+	  my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday) = POSIX::strptime($storm->btk_time_first, "%Y%m%d%H");
+          my $coldstartdate = POSIX::strftime( "%Y%m%d%H", $sec, $min, $hour-($hcl*24), $mday, $mon, $year, $wday, $yday );
+	  $formdata->coldstartdate($coldstartdate);
+          $formdata->newstart($storm->btk_time_first);
+          $formdata->nhc_storm( sprintf( "%s%02d%04d", $storm->nhc_basin, $storm->number, $storm->year ) );
+          $formdata->nowyear($storm->year);
+        }
+	elsif (not $formdata->coldstartdate) {
 	  my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday) = POSIX::strptime($formdata->newstart, "%Y%m%d%H");
-	  my $hcl = $formdata->hindcastlength;
           my $coldstartdate = POSIX::strftime( "%Y%m%d%H", $sec, $min, $hour-($hcl*24), $mday, $mon, $year, $wday, $yday );
 	  $formdata->coldstartdate($coldstartdate);
 	}
 
-        # get storm name
-        my $name = $formdata->name;
+	# year for nowification
+	if (not $formdata->nowyear) {
+          my $nowyear      = POSIX::strftime( "%Y", localtime($time) );
+          $formdata->nowyear($nowyear);
+        }
 
-        # currently in config.yml, need to move its own file
-        my $replayd_base = config->{replayd_base};
-        my $storm        = config->{storm_data}->{storms}->{$name};
+        if (not $formdata->nhc_storm) {
+          $formdata->nhc_storm( sprintf( "%s%02d%04d", $storm->nhc_basin, $storm->number, $formdata->{nowyear} ) );
+        }
 
         # add to $formdata so it's in the storm config file
-        $formdata->md5( $member->md5 );                             # augment w/ member uuid
-        $formdata->base( config->{storm_data}->{base} );            # augment w/ base directory for original storm data
-        $formdata->nowbase( $replayd_base->{nowbase} );             # augment w/ nowbase directory for original storm data
-        $formdata->source( $storm->{source} );                      # augment w/ source directory for original storm data
-        $formdata->number( $storm->{number} );                      # augment w/ original storm number
-        $formdata->year( $storm->{year} );                          # augment w/ original storm year
-        $formdata->btk_basin( $storm->{btk_basin} );                # augment w/ btk basin prefix
-        $formdata->nhc_basin( $storm->{nhc_basin} );                # augment w/ nhc basin prefix
-        $formdata->rss_basin( $storm->{rss_basin} );                # augment w/ rss basin prefix
-        $formdata->ipaddress( Net::Address::IP::Local->public );    # augment w/ public ip address
-        $formdata->hostname( $replayd_base->{hostname} );           # augment w/ hostname
-        $formdata->httpport( $replayd_base->{httpport} );           # augment w/ http port
-        # augment w/ NHC storm designatin, i.e.: al052022
-        $formdata->nhc_storm( sprintf( "%s%02d%04d", $storm->{nhc_basin}, $storm->{number}, $formdata->nowyear ) );
+        $formdata->uuid( $member->uuid );                        # augment w/ member uuid
+        $formdata->base( config->{storm_data}->{base} );         # augment w/ base directory for original storm data
+        $formdata->nowbase( $replayd_base->nowbase );            # augment w/ nowbase directory for original storm data
+        $formdata->source( $storm->source );                     # augment w/ source directory for original storm data
+        $formdata->number( $storm->number );                     # augment w/ original storm number
+        $formdata->year( $storm->year );                         # augment w/ original storm year
+        $formdata->btk_basin( $storm->btk_basin );               # augment w/ btk basin prefix
+        $formdata->nhc_basin( $storm->nhc_basin );               # augment w/ nhc basin prefix
+        $formdata->rss_basin( $storm->rss_basin );               # augment w/ rss basin prefix
+        $formdata->ipaddress( config->{local}->{ipaddress} );    # augment w/ public ip address
+        $formdata->hostname( $replayd_base->hostname );          # augment w/ hostname
+        $formdata->httpport( $replayd_base->httpport );          # augment w/ http port
+        # augment w/ NHC storm designation, i.e.: al052022
 
         # add md5_hex of uuid to config file to disambiguate
         my $storm_config = _config_file_name( $name, $member );
@@ -318,14 +339,14 @@ prefix '/api' => sub {
 
             # write config file
             my $config_template = qq{
-FTP_ROOT=<% FTP_ROOT %>
-FTP_FDIR=<% FTP_FDIR %>
-FTP_HDIR=<% FTP_HDIR %>
-HTTP_ROOT=<% HTTP_ROOT %>
+FTP_ROOT=[% FTP_ROOT %]
+FTP_FDIR=[% FTP_FDIR %]
+FTP_HDIR=[% FTP_HDIR %]
+HTTP_ROOT=[% HTTP_ROOT %]
 };
-            my $template      = Template->new( { START_TAG => '<%', END_TAG => '%>' } );
+            my $template      = Template->new;
             my $template_vars = config->{replayd_base};
-            $template_vars->{md5} = $member->md5;
+            $template_vars->{md5} = $member->uuid;
             my $config_content;
             $template->process( \$config_template, $template_vars, \$config_content );
             print $fh $config_content;
@@ -353,28 +374,27 @@ EARLIEST_ISSUE_EPOCH=NaN
         send_as JSON => { msg => q{OK} };
     };
 };
-
 sub _config_file_name {
     my ( $storm_name, $member ) = @_;
-    my $storm_config = sprintf qq{%s/%s.%s.config}, config->{replayd_base}->{configdir}, $member->md5, $storm_name;
+    my $storm_config = sprintf qq{%s/%s.%s.config}, config->{replayd_base}->{configdir}, $member->uuid, $storm_name;
     return $storm_config;
 }
 
 sub _status_file_name {
     my ( $storm_name, $member ) = @_;
-    my $storm_status = sprintf qq{%s/%s.%s.status}, config->{replayd_base}->{statusdir}, $member->md5, $storm_name;
+    my $storm_status = sprintf qq{%s/%s.%s.status}, config->{replayd_base}->{statusdir}, $member->uuid, $storm_name;
     return $storm_status;
 }
 
 sub _delete_file_name {
     my ( $storm_name, $member ) = @_;
-    my $storm_status = sprintf qq{%s/%s.%s.delete}, config->{replayd_base}->{statusdir}, $member->md5, $storm_name;
+    my $storm_status = sprintf qq{%s/%s.%s.delete}, config->{replayd_base}->{statusdir}, $member->uuid, $storm_name;
     return $storm_status;
 }
 
 sub _nextAdv_file_name {
     my ( $storm_name, $member ) = @_;
-    my $storm_status = sprintf qq{%s/%s.%s.nextAdv}, config->{replayd_base}->{statusdir}, $member->md5, $storm_name;
+    my $storm_status = sprintf qq{%s/%s.%s.nextAdv}, config->{replayd_base}->{statusdir}, $member->uuid, $storm_name;
     return $storm_status;
 }
 
@@ -396,6 +416,15 @@ sub _get_users_lookup {
     return h2o -recurse, $userlookup;
 }
 
+# AES Symmetric
+sub _decrypt {
+    my $password  = shift;
+    my $ciphertext = shift;
+    my $cipher = Crypt::CBC->new( -pass => $password, -cipher => 'Cipher::AES', -pbkdf=>'pbkdf2');
+    my $plaintext = $cipher->decrypt($ciphertext);
+    return $plaintext;
+}
+
 # API authentication, also sets $member via session so
 # that the /configure call can work the same; either by
 # API call or via WWW login session
@@ -409,16 +438,16 @@ sub _do_hmac {
         my $nonce         = request_header 'x-auth-nonce';
         my $decoded       = decode_base64($Authorization);
         my ( $apikey, $signature ) = split /:/, $decoded;
-        my $userlookup     = _get_users_lookup;
-        my $test_secretkey = $userlookup->apikeys->$apikey->apisecret;
-        my $test_signature = sha256_hex( $nonce . $test_secretkey );
 
-        # if signature can be replicated, return the member object
-        if ( $test_signature eq $signature ) {
-            $member = $userlookup->apikeys->$apikey;
-            session 'member' => o2h $member;
-        }
-        else {
+        my $USERDB  = sprintf(qq{%s/%s}, qq{$Bin/..}, config->{auth}->{dbfile});
+        my $dbh     = DBI->connect( "dbi:SQLite:dbname=$USERDB", "", "" );
+        my $sSQL    = qq{SELECT * from tbl_users WHERE apikey=?};
+        $member  = h2o $dbh->selectrow_hashref($sSQL, undef, $apikey);
+
+        my $test_secretkey2 = _decrypt(config->{auth}->{aeskey}, $member->{apihash});
+        my $test_signature2 = sha256_hex( $nonce . $test_secretkey2 );
+
+        if ( $test_signature2 ne $signature ) {
             # A P I  A U T H  F A I L E D
             send_error q/{ msg:"Access Denied" }/, HTTP_FORBIDDEN;
         }
@@ -436,45 +465,35 @@ sub _assert_auth {
     }
 
     # auth mode 1 - via JS API that relies on the login cookie
-    if ( $member and defined $member->username ) {
-        return $member;
-    }
-    else {
+    if ( not $member or not defined $member->username ) {
         # H T M L  A U T H  F A I L E D
         redirect '/logout';
     }
+
     return $member;
+}
+
+sub _checkhash {
+    my ($hash, $password) = @_;
+    chomp $password;
+    my $pbkdf2   = Crypt::PBKDF2->new();
+    return $pbkdf2->validate($hash, $password);
 }
 
 # used by POST:/login for WWW access
 sub _authenticate {
-    my $member = shift;
+    my $formdata = shift;
 
-    my $userlookup = _get_users_lookup;
-    my $username   = $member->username;
-
-    # "can" here bc we're using h2o to objectify the hash,
-    # effectively is an "exists" check of the hash key
-    if ( not $userlookup->users->can($username) ) {
+    my $USERDB  = sprintf(qq{%s/%s}, qq{$Bin/..}, config->{auth}->{dbfile});
+    my $dbh     = DBI->connect( "dbi:SQLite:dbname=$USERDB", "", "" );
+    my $sSQL    = qq{SELECT * from tbl_users WHERE username=?};
+    my $member  = $dbh->selectrow_hashref($sSQL, undef, $formdata->username);
+     
+    if ( not $member or not _checkhash($member->{passhash}, $formdata->password)) {
         return undef;
     }
 
-    # get user specific salt
-    my $salt = $userlookup->users->$username->salt;
-
-    # compares the provided password on login with the salted passhash, since
-    # the plain text password is never stored
-    if ( md5_hex( qq{$salt:} . $member->password ) eq $userlookup->users->$username->passhash ) {
-        $member->uuid( $userlookup->users->$username->uuid );
-        $member->md5( md5_hex( $member->uuid ) );
-        session 'member' => o2h $member;
-
-        # authenticated
-        return 1;
-    }
-
-    # not authenticated
-    return undef;
+    return $member;
 }
 
 true;
