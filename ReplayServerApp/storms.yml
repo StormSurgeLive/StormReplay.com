@@ -1,0 +1,66 @@
+---
+storm_data:
+  base: "/home/user/git/storm-archive"
+  storms:
+    dorian:
+      source: "2019/DORIAN"
+      btk_basin: "al"
+      rss_basin: "at"
+      nhc_basin: "al"
+      year: 2019
+      number: 5
+      minstartadv: 1
+      maxendadv: 64
+      btk_time_first:  "2019082412"
+      btk_time_last:   "2019090900"
+      landfall_date:   "2019090612"
+      coldstartdate:   "2019072412"
+      hindcastenddate: "2019090900"
+      coldstartlength: 30.0
+      hindcastlength:  30.0
+    gustav:
+      source: "gustav"
+      btk_basin: "al"
+      rss_basin: "at"
+      nhc_basin: "al"
+      year: 2008
+      number: 7
+      minstartadv: 1
+      maxendadv: 35 
+      btk_time_first:  "2008082500"
+      btk_time_last:   "2008090206"
+      landfall_date:   "2008090206"
+      coldstartdate:   "2008072500"
+      hindcastenddate: "2008090206"
+      coldstartlength: 30.0
+      hindcastlength:  30.0
+
+reserve_storm_data:
+    melissa:
+      source: "2019/MELISSA"
+      btk_basin: "al"
+      rss_basin: "at"
+      nhc_basin: "al"
+      year: 2019
+      number: 14
+      minstartadv: 1
+      maxendadv: 13
+    katrina:
+      source: "katrina"
+      btk_basin: "al"
+      rss_basin: "at"
+      nhc_basin: "al"
+      year: 2005
+      number: 12
+      minstartadv: 1
+      maxendadv: 31 
+    rita:
+      source: "rita"
+      btk_basin: "al"
+      rss_basin: "at"
+      nhc_basin: "al"
+      year: 2005
+      number: 18
+      minstartadv: 1
+      maxendadv: 30 
+

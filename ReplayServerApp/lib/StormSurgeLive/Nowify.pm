@@ -12,17 +12,6 @@ use POSIX::strptime qw//;
 use POSIX qw//;
 use Util::H2O::More qw/h2o o2h opt2h2o/;
 
-sub ddd {
-    require Data::Dumper;
-    print Data::Dumper::Dumper(@_);
-}
-
-sub dddie {
-    require Data::Dumper;
-    print Data::Dumper::Dumper(@_);
-    exit;
-}
-
 sub new {
     my $pkg  = shift;
     my %opts = @_;
@@ -30,7 +19,6 @@ sub new {
     return $self;
 }
 
-# TODO - will break if used with replayd
 sub just_copy_dont_nowify {
     my ( $self, $o ) = @_;
 

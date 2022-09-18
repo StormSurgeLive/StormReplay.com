@@ -1,16 +1,30 @@
     <table border=1>
       <tr>
-         <th>Name</th>
-         <th>Year</th>
-         <th>Start</th>
-         <th>Ending</th>
+         <td>Name</td>
+         <td>Storm</td>
+         <td>Year</td>
+         <td>Start Adv</td>
+         <td>Ending Adv</td>
+         <td>First BTK</td>
+         <td>Last BTK</td>
+         <td>Landfall</td>
+         <td><pre>COLDSTARTDATE</pre></td>
+         <td><pre>HINDCASTENDDATE</pre></td>
+         <td>Source</td>
        </tr>
        [% FOREACH storm IN storms.keys.sort -%]
        <tr>
          <td>[% storm.ucfirst -%]</td>
+         <td align=right>[% storms.$storm.number -%]</td>
          <td>[% storms.$storm.year -%]</td>
-         <td align=right>[% storms.$storm.minstart -%]</td>
-         <td align=right>[% storms.$storm.maxend -%]</td>
+         <td align=right>[% storms.$storm.minstartadv -%]</td>
+         <td align=right>[% storms.$storm.maxendadv -%]</td>
+         <td align=right><pre>[% storms.$storm.btk_time_first -%]</pre></td>
+         <td align=right><pre>[% storms.$storm.btk_time_last -%]</pre></td>
+         <td align=right><pre>[% storms.$storm.landfall_date -%]</pre></td>
+         <td align=right><pre>[% storms.$storm.coldstartdate -%]</pre></td>
+         <td align=right><pre>[% storms.$storm.hindcastenddate -%]</pre></td>
+         <td align=right><pre>[% storms.$storm.source -%]/</pre></td>
        </tr>
        [% END -%]
     </table>

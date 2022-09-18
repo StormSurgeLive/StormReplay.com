@@ -21,6 +21,8 @@ use Crypt::CBC qw//;
 
 our $VERSION = '0.1';
 
+my $STORMS = YAML::LoadFile(config->{local}->{storms_file});
+
 # make sure config dir exists
 if ( config->{replayd_base}->{configdir} and not -d config->{replayd_base}->{configdir} ) {
     make_path( config->{replayd_base}->{configdir}, { chmod => 0755 } );
@@ -57,7 +59,7 @@ prefix '/' => sub {
         my $member = _assert_auth();
 
         # defined in the application configuration
-        my $storms    = config->{storm_data}->{storms};
+        my $storms    = $STORMS->{storm_data}->{storms};
         my $stormJSON = encode_json $storms;
 
         template 'new' => { title => 'Configure a New Storm', member => $member, storms => $storms, stormJSON => $stormJSON }, { layout => q{3col-member} };
@@ -67,7 +69,7 @@ prefix '/' => sub {
         my $member = _assert_auth();
 
         # defined in the application configuration
-        my $storms = config->{storm_data}->{storms};
+        my $storms = $STORMS->{storm_data}->{storms};
 
         template 'stormlist' => { title => 'Storm Archive Info', member => $member, storms => $storms }, { layout => q{3col-member} };
     };
@@ -127,7 +129,7 @@ sub _status {
 prefix '/api' => sub {
     get '/storms' => sub {
         my $member = _do_hmac();
-        my $storms = config->{storm_data}->{storms};
+        my $storms = $STORMS->{storm_data}->{storms};
         if (%$storms) {
             send_as JSON => { msg => q{OK}, storms => $storms },;
         }
@@ -243,7 +245,7 @@ prefix '/api' => sub {
         # source storm information
         my $name         = $formdata->name;
         my $replayd_base = h2o { %{config->{replayd_base}} };
-        my $storm        = h2o { %{config->{storm_data}->{storms}->{$name}} };
+        my $storm        = h2o { %{$STORMS->{storm_data}->{storms}->{$name}} };
 
 	# set some defaults in $formdata
         if ( not $formdata->loop ) {
@@ -298,7 +300,7 @@ prefix '/api' => sub {
 
         # add to $formdata so it's in the storm config file
         $formdata->uuid( $member->uuid );                        # augment w/ member uuid
-        $formdata->base( config->{storm_data}->{base} );         # augment w/ base directory for original storm data
+        $formdata->base( $STORMS->{storm_data}->{base} );        # augment w/ base directory for original storm data
         $formdata->nowbase( $replayd_base->nowbase );            # augment w/ nowbase directory for original storm data
         $formdata->source( $storm->source );                     # augment w/ source directory for original storm data
         $formdata->number( $storm->number );                     # augment w/ original storm number

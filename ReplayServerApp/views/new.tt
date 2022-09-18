@@ -1,4 +1,4 @@
-    <div ng-app="newStormApp" ng-controller="listController">
+    <div ng-app="newStormApp" ng-controller="newStormController">
       <form ng-model="new_storm_form" name="new_storm_form">
         <table border=1 width=545>
           <tr>
@@ -17,6 +17,40 @@
               <br/>
             </td>
           </tr>
+          <tr ng-show="data.name" bgcolor=#f0f8ff>
+            <td align=left> Start Advisory</td align=left>
+            <td align=left> 
+              <select name="selectStart" id="selectStart" ng-options="option.name for option in options track by option.value" ng-model="data.startadv"></select>
+            </td>
+          </tr>
+          <tr ng-show="data.name" bgcolor=#f0f8ff>
+            <td align=left> End Advisory</td align=left>
+            <td align=left> 
+              <select name="selectEnd" id="selectEnd" ng-options="option.name for option in options track by option.value" ng-model="data.endadv"></select>
+            </td>
+          </tr>
+          <tr ng-show="data.name" bgcolor=#f0f8ff>
+            <td align=left> <code>COLDSTARTDATE</code></td align=left>
+            <td align=left>
+              <input size=5 ng-model="data.coldstartdate">
+              <br/><font size=1><i>format: YYYYMMDD</i></font>
+            </td>
+          </tr>
+          <tr ng-show="data.name" bgcolor=#f0f8ff>
+            <td align=left> <code>COLDSTARTDATE</code> length</td align=left>
+            <td align=left> <input size=2 ng-model="data.coldstartlength"> (days)</td>
+          </tr>
+          <tr ng-show="data.name" bgcolor=#f0f8ff>
+            <td align=left> <code>HINDENDDATE</code></td align=left>
+            <td align=left>
+              <input size=5 ng-model="data.hindcastenddate">
+              <br/><font size=1><i>format: YYYYMMDD</i></font>
+            </td>
+          </tr>
+          <tr ng-show="data.name" bgcolor=#f0f8ff>
+            <td align=left> <code>HINDCASTLENGTH</code></td align=left>
+            <td align=left> <input size=2 ng-model="data.hindcastlength"> (days)</td>
+          </tr>
           <tr>
             <td align=left>
               Issuing Frequency 
@@ -31,7 +65,7 @@
               <br/><font size=2 color=gray>Turns off <i>nowification</i>, fixates on the landfall advisory, computes <i>COLDSTARTDATE</i> and <i>HINDCASTENDDATE</i> based on a precise landfall data/time.</font>
             </td align=left>
             <td align=left valign=top>
-              <input type=checkbox ng-model="data.isHindcast">
+              <input type=checkbox ng-model="data.isHindcast" ng-checked="!data.nowify">
             </td>
           </tr>
           <tr>
@@ -47,13 +81,14 @@
               <span align=right ng-if="data.notify"><input type=text style="height:12px" ng-model="data.email" size=30></span>
             </td>
           </tr>
-          <tr ng-hide="data.isHindcast">
+          <tr>
             <td colspan=2 align=left>
               <input type=checkbox ng-model="data.nowify" ng-checked="!data.isHindcast"/>
               <i>Nowify</i> (uncheck to skip <i>nowification</i>, off for <i>all</i> hindcasts)
             </td>
           </tr>
           <tr ng-hide="data.isHindcast || !data.nowify">
+
             <td align=left>
               Nowification Interval
               <br/><font size=2 color=gray>Specifies the time nowificationInterval of the data records produced.</font>
@@ -61,26 +96,6 @@
             <td align=left>
               <select name="selectNowificationInterval" id="selectNowificationInterval" ng-options="nowificationInterval.name for nowificationInterval in nowificationIntervals track by nowificationInterval.value" ng-model="data.nowificationInterval"></select>
             </td>
-          </tr>
-          <tr ng-hide="data.isHindcast">
-            <td align=left> Start Advisory</td align=left>
-            <td align=left> 
-              <select name="selectStart" id="selectStart" ng-options="option.name for option in options track by option.value" ng-model="data.startadv"></select>
-            </td>
-          </tr>
-          <tr ng-hide="data.isHindcast">
-            <td align=left> End Advisory</td align=left>
-            <td align=left> 
-              <select name="selectEnd" id="selectEnd" ng-options="option.name for option in options track by option.value" ng-model="data.endadv"></select>
-            </td>
-          </tr>
-          <tr ng-hide="data.isHindcast">
-            <td align=left> <code>COLDSTARTDATE</code></td align=left>
-            <td align=left> tbd</td>
-          </tr>
-          <tr ng-hide="data.isHindcast">
-            <td align=left> <code>HINDCASTLENGTH</code></td align=left>
-            <td align=left> 30.0</td>
           </tr>
           <tr>
             <td bgcolor=lightgreen colspan=2 align=center ng-if="(data.name && data.isHindcast) || (data.name && data.startadv && data.endadv && data.frequency)">
@@ -96,11 +111,12 @@
     <script>
      /* AngularJS Application Controller */
      var newStormApp=angular.module('newStormApp',[]);
-     newStormApp.controller('listController', ['$scope', '$http', '$timeout', function ($scope, $http, $timeout) {
+     newStormApp.controller('newStormController', ['$scope', '$http', function ($scope, $http) {
          var baseAPIUrl = getBaseURL(); 
 
          $scope.data = {};
          $scope.error = {};
+         $scope.stormSelected = false;
 
          // storm JSON placed via templated parameter
          $scope.storms = [% stormJSON -%];
@@ -140,14 +156,22 @@
 	 $scope.data.nowify = true;
 
          $scope.onStormSelect=function(name) {
-           var startadvIdx = $scope.storms[name]['minstartadv'] - 1;
-           var endadvIdx = $scope.storms[name]['maxendadv'] - 1;
+           var storm = $scope.storms[name];
+           var startadvIdx = storm['minstartadv'] - 1;
+           var endadvIdx = storm['maxendadv'] - 1;
            $scope.options = [];
-           for (let i = $scope.storms[name]['minstartadv']; i <= $scope.storms[name]['maxendadv']; i++) {
+           for (let i = storm['minstartadv']; i <= storm['maxendadv']; i++) {
              $scope.options.push({value: i, name: "Advisory " + i});
            }
            $scope.data.startadv = $scope.options[0];
            $scope.data.endadv   = $scope.options[endadvIdx];
+           $scope.data.hindcastenddate = storm['hindcastenddate']; 
+           $scope.data.hindcastlength = storm['hindcastlength']; 
+           $scope.data.coldstartdate = storm['coldstartdate']; 
+           $scope.data.coldstartlength = storm['coldstartlength']; 
+           $scope.data.btk_time_first = storm['btk_time_first']; 
+           $scope.data.btk_time_last = storm['btk_time_last']; 
+           $scope.stormSelected = true;
          }
 
          // update existing item to server

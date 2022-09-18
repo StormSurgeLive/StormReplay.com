@@ -20,17 +20,6 @@ use Getopt::Long;
 use StormSurgeLive::Nowify qw//;
 use StormSurgeLive::Notify qw//;
 
-sub ddd {
-    require Data::Dumper;
-    print Data::Dumper::Dumper( \@_ );
-}
-
-sub dddie {
-    require Data::Dumper;
-    print Data::Dumper::Dumper( \@_ );
-    die;
-}
-
 my @options = (qw/appconfig=s configdir=s statusdir=s wait=i DEBUG/);
 my $opts    = h2o {
     appconfig => qq{$Bin/../config.yml},    # this is the Dancer2 app config
