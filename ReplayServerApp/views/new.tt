@@ -1,12 +1,13 @@
     <div ng-app="newStormApp" ng-controller="newStormController">
-      <form ng-model="new_storm_form" name="new_storm_form">
+      <form ng-model="new_storm_form" name="new_storm_form" ng-cloak>
         <table border=1 width=545>
+          <thead>
           <tr>
             <th>Option</th>
             <th>Selection</th>
           </tr>
           <tr>
-            <td align=left>Historical Storm<sup><a href=/stormlist target=_other>+</a></sup></td>
+            <td width=75% align=left>Historical Storm<sup><a href=/stormlist target=_other>+</a></sup></td>
             <td align=left>
               <select ng-model="data.name" ng-change="onStormSelect(data.name)">
                 <option value="" ng-selected="selected">Select a Storm!</option>
@@ -17,41 +18,46 @@
               <br/>
             </td>
           </tr>
-          <tr ng-show="data.name" bgcolor=#f0f8ff>
+          </thead>
+          <tbody ng-show="data.name">
+          <tr>
+            <td align=left>
+              Storm is for an <i>ASGS Hindcast</i>
+              <!-- <br/><font size=2 color=gray>Turns off <i>nowification</i>, uses predetermined <i>COLDSTARTDATE</i>, <i>HINDCASTLENGTH</i>, final (and only) Advisory (XML), and the <i>final</i> best track - all determined on calculations based on precise landfall data/time.</font> -->
+            </td align=left>
+            <td align=left valign=top>
+              <input type=checkbox ng-model="data.isHindcast" ng-checked="!data.nowify">
+            </td>
+          </tr>
+          <tr ng-show="data.isHindcast" bgcolor=#f0f8ff>
+            <td align=left>Final Advisory</td align=left>
+            <td align=left>{{ data.advNum }}</td>
+          </tr>
+          <tr ng-show="data.isHindcast" bgcolor=#f0f8ff>
+            <td align=left><code>COLDSTARTDATE</code><br/><font size=1>(<i>YYYYMMDD</i>)</font></td>
+            <td align=left><code>{{ data.COLDSTARTDATE }}</code></td>
+          </tr>
+          <tr ng-show="data.isHindcast" bgcolor=#f0f8ff>
+            <td align=left> Last Best Track record<br/><font size=1>(<i>YYYYMMDD</i>)</font></td align=left>
+            <td align=left><code>{{ data.btk_time_last }}</code></td>
+          </tr>
+          <tr ng-show="data.isHindcast" bgcolor=#f0f8ff>
+            <td align=left> <code>HINDCASTLENGTH</code><br/><font size=1>(<i>days</i>)</font></td align=left>
+            <td align=left><code>{{ data.HINDCASTLENGTH }}</code></td>
+          </tr>
+          <tr ng-show="!data.isHindcast" bgcolor=#f0f8ff>
             <td align=left> Start Advisory</td align=left>
             <td align=left> 
               <select name="selectStart" id="selectStart" ng-options="option.name for option in options track by option.value" ng-model="data.startadv"></select>
             </td>
           </tr>
-          <tr ng-show="data.name" bgcolor=#f0f8ff>
+          <tr ng-show="!data.isHindcast" bgcolor=#f0f8ff>
             <td align=left> End Advisory</td align=left>
             <td align=left> 
               <select name="selectEnd" id="selectEnd" ng-options="option.name for option in options track by option.value" ng-model="data.endadv"></select>
             </td>
           </tr>
-          <tr ng-show="data.name" bgcolor=#f0f8ff>
-            <td align=left> <code>COLDSTARTDATE</code></td align=left>
-            <td align=left>
-              <input size=5 ng-model="data.coldstartdate">
-              <br/><font size=1><i>format: YYYYMMDD</i></font>
-            </td>
-          </tr>
-          <tr ng-show="data.name" bgcolor=#f0f8ff>
-            <td align=left> <code>COLDSTARTDATE</code> length</td align=left>
-            <td align=left> <input size=2 ng-model="data.coldstartlength"> (days)</td>
-          </tr>
-          <tr ng-show="data.name" bgcolor=#f0f8ff>
-            <td align=left> <code>HINDENDDATE</code></td align=left>
-            <td align=left>
-              <input size=5 ng-model="data.hindcastenddate">
-              <br/><font size=1><i>format: YYYYMMDD</i></font>
-            </td>
-          </tr>
-          <tr ng-show="data.name" bgcolor=#f0f8ff>
-            <td align=left> <code>HINDCASTLENGTH</code></td align=left>
-            <td align=left> <input size=2 ng-model="data.hindcastlength"> (days)</td>
-          </tr>
-          <tr>
+          <tr ng-show="!data.isHindcast" bgcolor=#f0f8ff>
             <td align=left>
               Issuing Frequency 
               <br/><font size=2 color=gray>Specifies how often "new" advisories are issued in <i>real time</i>.</font>
@@ -60,15 +66,7 @@
               <select name="selectFrequency" id="selectFrequency" ng-options="frequency.name for frequency in frequencies track by frequency.value" ng-model="data.frequency"></select>
             </td>
           </tr>
-            <td align=left>
-              Storm is for an <i>ASGS Hindcast</i>
-              <br/><font size=2 color=gray>Turns off <i>nowification</i>, fixates on the landfall advisory, computes <i>COLDSTARTDATE</i> and <i>HINDCASTENDDATE</i> based on a precise landfall data/time.</font>
-            </td align=left>
-            <td align=left valign=top>
-              <input type=checkbox ng-model="data.isHindcast" ng-checked="!data.nowify">
-            </td>
-          </tr>
-          <tr>
+          <tr ng-show="!data.isHindcast" bgcolor=#f0f8ff>
             <td colspan=2 align=left>
               <input type=checkbox ng-model="data.loop"/>
               <i>Loop storm until stopped manually</i> 
@@ -78,10 +76,10 @@
             <td colspan=2 align=left>
               <input type=checkbox ng-model="data.notify"/>
               <i>Notify by Email</i> 
-              <span align=right ng-if="data.notify"><input type=text style="height:12px" ng-model="data.email" size=30></span>
+              <span align=right ng-if="data.notify"><input type=text ng-model="data.email" size=30></span>
             </td>
           </tr>
-          <tr>
+          <tr ng-show="!data.isHindcast" bgcolor=#f0f8ff>
             <td colspan=2 align=left>
               <input type=checkbox ng-model="data.nowify" ng-checked="!data.isHindcast"/>
               <i>Nowify</i> (uncheck to skip <i>nowification</i>, off for <i>all</i> hindcasts)
@@ -98,10 +96,11 @@
             </td>
           </tr>
           <tr>
-            <td bgcolor=lightgreen colspan=2 align=center ng-if="(data.name && data.isHindcast) || (data.name && data.startadv && data.endadv && data.frequency)">
+            <td bgcolor=lightgreen colspan=2 align=center>
               <button ng-click="doStart()">Start Storm!</button>
             </td>
           </tr>
+          </tbody>
         </table>
         <span ng-if="error.message"><font color="{{error.color}}">{{error.message}}</font><br/></span>
         <br/>Visit the <i><a href=/status>status</a></i> to manage your current storms.
@@ -157,21 +156,21 @@
 
          $scope.onStormSelect=function(name) {
            var storm = $scope.storms[name];
-           var startadvIdx = storm['minstartadv'] - 1;
-           var endadvIdx = storm['maxendadv'] - 1;
+           var startadvIdx = storm.minstartadv - 1;
+           var endadvIdx = storm.maxendadv - 1;
            $scope.options = [];
            for (let i = storm['minstartadv']; i <= storm['maxendadv']; i++) {
              $scope.options.push({value: i, name: "Advisory " + i});
            }
-           $scope.data.startadv = $scope.options[0];
-           $scope.data.endadv   = $scope.options[endadvIdx];
-           $scope.data.hindcastenddate = storm['hindcastenddate']; 
-           $scope.data.hindcastlength = storm['hindcastlength']; 
-           $scope.data.coldstartdate = storm['coldstartdate']; 
-           $scope.data.coldstartlength = storm['coldstartlength']; 
-           $scope.data.btk_time_first = storm['btk_time_first']; 
-           $scope.data.btk_time_last = storm['btk_time_last']; 
-           $scope.stormSelected = true;
+           $scope.data.startadv       = $scope.options[0];
+           $scope.data.endadv         = $scope.options[endadvIdx];
+           $scope.data.HINDCASTLENGTH = storm.hindcast_info.HINDCASTLENGTH; 
+           $scope.data.COLDSTARTDATE  = storm.hindcast_info.COLDSTARTDATE; 
+           $scope.data.btk_time_first = storm.hindcast_info.btk_time_first; 
+           $scope.data.btk_time_last  = storm.hindcast_info.btk_time_last; 
+           $scope.data.advNum         = storm.hindcast_info.advNum;
+           $scope.data.btk_time_last  = storm.hindcast_info.btk_time_last;
+           $scope.stormSelected       = true;
          }
 
          // update existing item to server

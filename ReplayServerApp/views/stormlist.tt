@@ -9,7 +9,7 @@
          <td>Last BTK</td>
          <td>Landfall</td>
          <td><pre>COLDSTARTDATE</pre></td>
-         <td><pre>HINDCASTENDDATE</pre></td>
+         <td><pre>HINDCASTLENGTH</pre></td>
          <td>Source</td>
        </tr>
        [% FOREACH storm IN storms.keys.sort -%]
@@ -21,9 +21,9 @@
          <td align=right>[% storms.$storm.maxendadv -%]</td>
          <td align=right><pre>[% storms.$storm.btk_time_first -%]</pre></td>
          <td align=right><pre>[% storms.$storm.btk_time_last -%]</pre></td>
-         <td align=right><pre>[% storms.$storm.landfall_date -%]</pre></td>
-         <td align=right><pre>[% storms.$storm.coldstartdate -%]</pre></td>
-         <td align=right><pre>[% storms.$storm.hindcastenddate -%]</pre></td>
+         <td align=right><pre>[% storms.$storm.hindcast_info.landfall_date -%]</pre></td>
+         <td align=right><pre>[% storms.$storm.hindcast_info.COLDSTARTDATE -%]</pre></td>
+         <td align=right><pre>[% storms.$storm.hindcast_info.HINDCASTLENGTH -%]</pre></td>
          <td align=right><pre>[% storms.$storm.source -%]/</pre></td>
        </tr>
        [% END -%]

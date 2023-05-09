@@ -2,22 +2,6 @@
 storm_data:
   base: "/home/user/git/storm-archive"
   storms:
-    dorian:
-      source: "2019/DORIAN"
-      btk_basin: "al"
-      rss_basin: "at"
-      nhc_basin: "al"
-      year: 2019
-      number: 5
-      minstartadv: 1
-      maxendadv: 64
-      btk_time_first:  "2019082412"
-      btk_time_last:   "2019090900"
-      landfall_date:   "2019090612"
-      coldstartdate:   "2019072412"
-      hindcastenddate: "2019090900"
-      coldstartlength: 30.0
-      hindcastlength:  30.0
     gustav:
       source: "gustav"
       btk_basin: "al"
@@ -29,13 +13,26 @@ storm_data:
       maxendadv: 35 
       btk_time_first:  "2008082500"
       btk_time_last:   "2008090206"
-      landfall_date:   "2008090206"
-      coldstartdate:   "2008072500"
-      hindcastenddate: "2008090206"
-      coldstartlength: 30.0
-      hindcastlength:  30.0
+      hindcast_info:
+        btk_time_first:  "2008082500"
+        btk_time_last:   "2008090206"
+        COLDSTARTDATE:   "2008082700"
+        HINDCASTLENGTH:  30.0
+        landfall_date:   "09/01/2008 15:00 UTC"
+        advNum:          35
 
 reserve_storm_data:
+    dorian:
+      source: "2019/DORIAN"
+      btk_basin: "al"
+      rss_basin: "at"
+      nhc_basin: "al"
+      year: 2019
+      number: 5
+      minstartadv: 1
+      maxendadv: 64
+      btk_time_first:  "2019082412"
+      btk_time_last:   "2019090900"
     melissa:
       source: "2019/MELISSA"
       btk_basin: "al"

@@ -335,7 +335,7 @@ sub _update_rss {
 
     print qq{New advisory date: $new_line6\n} if $self->{DEBUG};
 
-    my $old_line6 = (split /\n/, $description)[6];
+    my $old_line6 = (split /\n/, $description)[5];
     $description =~ s/$old_line6/$new_line6/g;
 
     # get all date strings of the form "DD/HH00Z" (not unique)

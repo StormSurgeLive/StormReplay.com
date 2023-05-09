@@ -21,7 +21,11 @@ use Crypt::CBC qw//;
 
 our $VERSION = '0.1';
 
-my $STORMS = YAML::LoadFile(config->{local}->{storms_file});
+# initial load, will get reloaded
+sub _get_STORMS {
+  my $STORMS = YAML::LoadFile(config->{local}->{storms_file});
+  return $STORMS;
+}
 
 # make sure config dir exists
 if ( config->{replayd_base}->{configdir} and not -d config->{replayd_base}->{configdir} ) {
@@ -57,6 +61,7 @@ prefix '/' => sub {
 
     get 'new' => sub {
         my $member = _assert_auth();
+        my $STORMS = _get_STORMS();
 
         # defined in the application configuration
         my $storms    = $STORMS->{storm_data}->{storms};
@@ -67,6 +72,7 @@ prefix '/' => sub {
 
     get 'stormlist' => sub {
         my $member = _assert_auth();
+        my $STORMS = _get_STORMS();
 
         # defined in the application configuration
         my $storms = $STORMS->{storm_data}->{storms};
@@ -97,7 +103,7 @@ sub _status {
 
     my $details_ref = {};
 
-    my $uuid = $member->uuid; 
+    my $uuid = $member->uuid;
 
     # get all specific user configs
     opendir( my $dh1, $configdir ) || die "Can't opendir $configdir: $!";
@@ -129,6 +135,8 @@ sub _status {
 prefix '/api' => sub {
     get '/storms' => sub {
         my $member = _do_hmac();
+        my $STORMS = _get_STORMS();
+
         my $storms = $STORMS->{storm_data}->{storms};
         if (%$storms) {
             send_as JSON => { msg => q{OK}, storms => $storms },;
@@ -223,6 +231,7 @@ prefix '/api' => sub {
 
     post '/configure' => sub {
         my $member = ( request_header 'X-replayd-api-version' ) ? _do_hmac() : _assert_auth();
+        my $STORMS = _get_STORMS();
 
         # capture storm config from request data
         my @form_fields = (
@@ -268,7 +277,7 @@ prefix '/api' => sub {
         ## compute COLDSTARTDATE based on original storm's first btk time stamp
 	my $hcl = $formdata->hindcastlength;
 
-	# if not provided, defaults to basically, NOW 
+	# if not provided, defaults to basically, NOW
 	if (not $formdata->newstart) {
           my $newstart     = POSIX::strftime( "%Y%m%d%H", localtime($time) );
           $formdata->newstart($newstart);
@@ -490,7 +499,7 @@ sub _authenticate {
     my $dbh     = DBI->connect( "dbi:SQLite:dbname=$USERDB", "", "" );
     my $sSQL    = qq{SELECT * from tbl_users WHERE username=?};
     my $member  = $dbh->selectrow_hashref($sSQL, undef, $formdata->username);
-     
+
     if ( not $member or not _checkhash($member->{passhash}, $formdata->password)) {
         return undef;
     }
